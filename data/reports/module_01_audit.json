@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-10-09T15:00:47Z",
+  "status": "PASS",
+  "scope": "Module 01 local data preparation through Step 15",
+  "checks": [
+    {
+      "name": "raw_source_checksums",
+      "status": "PASS",
+      "files": 7
+    },
+    {
+      "name": "prepared_and_fixture_checksums",
+      "status": "PASS"
+    },
+    {
+      "name": "profiling_and_quality_reports",
+      "status": "PASS"
+    },
+    {
+      "name": "canonical_reference_rebuilt_from_sources",
+      "status": "PASS",
+      "rows": 9742,
+      "ref_version": "20261004-5b4e04a2"
+    },
+    {
+      "name": "all_ratings_replay_contract_and_sort",
+      "status": "PASS",
+      "rows": 100836,
+      "min_timestamp": 828124615,
+      "max_timestamp": 1537799250
+    },
+    {
+      "name": "all_tmdb_snapshots",
+      "status": "PASS",
+      "snapshots": 1,
+      "records": 20,
+      "reference_matches": 0
+    },
+    {
+      "name": "fixtures_are_real_and_joinable",
+      "status": "PASS",
+      "movie_events": 20,
+      "tmdb_snapshots": 20,
+      "reference": 20
+    },
+    {
+      "name": "contract_artifacts_do_not_contain_configured_secret",
+      "status": "PASS"
+    },
+    {
+      "name": "git_secret_and_dataset_exclusions",
+      "status": "PASS",
+      "tracked_file_count": 42
+    },
+    {
+      "name": "data_contract_document_present",
+      "status": "PASS"
+    }
+  ],
+  "warnings": [
+    {
+      "rule": "tmdb_reference_coverage",
+      "matched": 0,
+      "total": 20,
+      "message": "Trending TMDB movies can be absent from the MovieLens base reference. Consumers must handle unmatched tmdbId without dropping events."
+    }
+  ],
+  "pending": [
+    "DATA_CONTRACT.md remains v1.0-draft; team approval to freeze is not recorded.",
+    "Step 16: HDFS publish awaits an endpoint and infrastructure.",
+    "Step 17: Kafka, MapReduce and Spark consumer confirmations are not available; local sample join passes."
+  ]
+}
