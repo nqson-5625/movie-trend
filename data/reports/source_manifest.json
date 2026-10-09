@@ -1,0 +1,156 @@
+{
+  "build_id": "20261008T155339Z",
+  "movielens_variant": "ml-latest-small",
+  "sources": [
+    {
+      "source_name": "MovieLens",
+      "variant": "ml-latest-small",
+      "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
+      "retrieved_at": "2026-10-04T10:22:28Z",
+      "archive_sha256": "696d65a3dfceac7c45750ad32df2c259311949efec81f0f144fdfb91ebc9e436",
+      "files": [
+        {
+          "name": "README.txt",
+          "size_bytes": 8342,
+          "sha256": "63d22ac138e80fae37021797ed8e1b9424b5239dc576a137422adf783ae3f404",
+          "filename": "README.txt",
+          "path": "data/raw/movielens/ml-latest-small/README.txt",
+          "source_name": "MovieLens",
+          "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
+          "retrieved_at": "2026-10-04T10:22:28Z"
+        },
+        {
+          "name": "links.csv",
+          "size_bytes": 197979,
+          "sha256": "97ad18e4e56a09363c65676b6cb3482ce3e2cea2372a24620c1599c843325f31",
+          "filename": "links.csv",
+          "path": "data/raw/movielens/ml-latest-small/links.csv",
+          "source_name": "MovieLens",
+          "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
+          "retrieved_at": "2026-10-04T10:22:28Z"
+        },
+        {
+          "name": "movies.csv",
+          "size_bytes": 494431,
+          "sha256": "5a5f32dd9bb3797b8e728a1b98958789d2b13f294a69fdfbc5727f8a9611aa07",
+          "filename": "movies.csv",
+          "path": "data/raw/movielens/ml-latest-small/movies.csv",
+          "source_name": "MovieLens",
+          "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
+          "retrieved_at": "2026-10-04T10:22:28Z"
+        },
+        {
+          "name": "ratings.csv",
+          "size_bytes": 2483723,
+          "sha256": "aa289ca83157595d0df6aea1be6a4ded676ddc4385472e8313a8ed9805352646",
+          "filename": "ratings.csv",
+          "path": "data/raw/movielens/ml-latest-small/ratings.csv",
+          "source_name": "MovieLens",
+          "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
+          "retrieved_at": "2026-10-04T10:22:28Z"
+        },
+        {
+          "name": "tags.csv",
+          "size_bytes": 118660,
+          "sha256": "92a9f8bb7916dceef6151209845788c3643f794dfa79d1feaec7121b5960399d",
+          "filename": "tags.csv",
+          "path": "data/raw/movielens/ml-latest-small/tags.csv",
+          "source_name": "MovieLens",
+          "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
+          "retrieved_at": "2026-10-04T10:22:28Z"
+        }
+      ]
+    },
+    {
+      "source_name": "IMDb",
+      "retrieved_at": "2026-10-04T10:46:23Z",
+      "files": [
+        {
+          "name": "title.basics.tsv.gz",
+          "source_url": "https://datasets.imdbws.com/title.basics.tsv.gz",
+          "size_bytes": 228002230,
+          "sha256": "8a7415fd9dab0496a663d058247238c24e2899e8e43c2f7fcc53e5091b015eeb",
+          "filename": "title.basics.tsv.gz",
+          "path": "data/raw/imdb/title.basics.tsv.gz",
+          "source_name": "IMDb",
+          "retrieved_at": "2026-10-04T10:46:23Z"
+        },
+        {
+          "name": "title.ratings.tsv.gz",
+          "source_url": "https://datasets.imdbws.com/title.ratings.tsv.gz",
+          "size_bytes": 8672286,
+          "sha256": "892723243af1d27b48bf3757b72bd40efbe99c53caa7e72ab2a6fea9975c184a",
+          "filename": "title.ratings.tsv.gz",
+          "path": "data/raw/imdb/title.ratings.tsv.gz",
+          "source_name": "IMDb",
+          "retrieved_at": "2026-10-04T10:46:23Z"
+        }
+      ],
+      "source_url": "https://datasets.imdbws.com/"
+    },
+    {
+      "source_name": "TMDB",
+      "source_url": "https://api.themoviedb.org/3/trending/movie/day",
+      "retrieved_at": "2026-10-08T10:44:04Z",
+      "files": [
+        {
+          "filename": "snapshot_20261008T104404Z.jsonl",
+          "path": "data/prepared/tmdb/snapshot_20261008T104404Z.jsonl",
+          "size_bytes": 5803,
+          "sha256": "46fe8a6ed93c38a64bac8fa9421fe4d0ff14e466cf8d8b50dfc018a104c65894",
+          "name": "snapshot_20261008T104404Z.jsonl",
+          "source_name": "TMDB",
+          "source_url": "https://api.themoviedb.org/3/trending/movie/day",
+          "retrieved_at": "2026-10-08T10:44:04Z",
+          "row_count": 20,
+          "artifact_kind": "normalized_snapshot"
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "filename": "movie_reference.tsv",
+    "path": "data/prepared/reference/movie_reference.tsv",
+    "size_bytes": 1159716,
+    "sha256": "975074c3bd5510a77ae883bc2f439ecc339f6615d6acf5e0161c2662a1789ccb",
+    "row_count": 9742,
+    "ref_version": "20261004-5b4e04a2",
+    "generated_at": "2026-10-04T11:47:24Z",
+    "source_hash": "5b4e04a25c4645450e0a98d665c34ff1498b456955a727dd14141cc551250b1a"
+  },
+  "prepared": [
+    {
+      "filename": "ratings_sorted.csv",
+      "path": "data/prepared/movielens/ratings_sorted.csv",
+      "size_bytes": 2382886,
+      "sha256": "2d0cd09f050de47d821972388a01fd3568fe6ecdd155f9b7f63abf509693561b",
+      "row_count": 100836
+    }
+  ],
+  "fixtures": [
+    {
+      "filename": "movie-events.sample.jsonl",
+      "path": "contracts/samples/movie-events.sample.jsonl",
+      "size_bytes": 4739,
+      "sha256": "6dda1623d1f640cd392ffdee84844f893a6b81a1b6cfcc429e27827c554ac686",
+      "row_count": 20,
+      "schema": "contracts/schemas/movie-events.schema.json"
+    },
+    {
+      "filename": "tmdb-snapshots.sample.jsonl",
+      "path": "contracts/samples/tmdb-snapshots.sample.jsonl",
+      "size_bytes": 5803,
+      "sha256": "46fe8a6ed93c38a64bac8fa9421fe4d0ff14e466cf8d8b50dfc018a104c65894",
+      "row_count": 20,
+      "schema": "contracts/schemas/tmdb-snapshots.schema.json"
+    },
+    {
+      "filename": "movie-reference.sample.tsv",
+      "path": "contracts/samples/movie-reference.sample.tsv",
+      "size_bytes": 2563,
+      "sha256": "dcaf93a7366e85565a2d09157ac0450fe922b431dcd3d47aaf5a56fcace1ddf0",
+      "row_count": 20,
+      "schema": "contracts/schemas/movie-reference.schema.json"
+    }
+  ]
+}
