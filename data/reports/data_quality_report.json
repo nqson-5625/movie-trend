@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-10-08T15:53:36Z",
+  "reference_path": "data/prepared/reference/movie_reference.tsv",
+  "status": "PASS",
+  "row_count_check": {
+    "movie_reference_rows": 9742,
+    "movies_rows": 9742,
+    "equal": true
+  },
+  "hard_failures": [],
+  "coverage": {
+    "total_movies": 9742,
+    "has_imdb_id": {
+      "count": 9742,
+      "percent": 100.0
+    },
+    "has_tmdb_id": {
+      "count": 9734,
+      "percent": 99.9179
+    },
+    "matched_imdb_basics": {
+      "count": 9719,
+      "percent": 99.7639
+    },
+    "has_imdb_rating": {
+      "count": 9719,
+      "percent": 99.7639
+    },
+    "missing_release_year": {
+      "count": 0,
+      "percent": 0.0
+    },
+    "no_genres_listed": {
+      "count": 34,
+      "percent": 0.349
+    }
+  }
+}
