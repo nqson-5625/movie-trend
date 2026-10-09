@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-10-08T15:53:37Z",
+  "note": "Movie event ingest_time is fixture creation time, not evidence of Kafka arrival.",
+  "fixtures": {
+    "movie-events": {
+      "source_path": "data/prepared/movielens/ratings_sorted.csv",
+      "source_sha256": "2d0cd09f050de47d821972388a01fd3568fe6ecdd155f9b7f63abf509693561b",
+      "row_count": 20
+    },
+    "tmdb-snapshots": {
+      "source_path": "data/prepared/tmdb/snapshot_20261008T104404Z.jsonl",
+      "source_sha256": "46fe8a6ed93c38a64bac8fa9421fe4d0ff14e466cf8d8b50dfc018a104c65894",
+      "row_count": 20
+    },
+    "movie-reference": {
+      "source_path": "data/prepared/reference/movie_reference.tsv",
+      "source_sha256": "975074c3bd5510a77ae883bc2f439ecc339f6615d6acf5e0161c2662a1789ccb",
+      "row_count": 20
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Canonical movie reference row v1.0",
+  "description": "Logical row schema. Decode TSV empty cells as null only for nullable fields; parse numeric cells before validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["movieId", "title", "release_year", "genres", "imdbId", "tmdbId", "imdb_rating", "imdb_votes", "ref_version", "generated_at"],
+  "properties": {
+    "movieId": {"type": "integer", "minimum": 1},
+    "title": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "release_year": {"type": ["integer", "null"]},
+    "genres": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "imdbId": {"type": ["string", "null"], "pattern": "^tt[0-9]{7,}$"},
+    "tmdbId": {"type": ["integer", "null"], "minimum": 1},
+    "imdb_rating": {"type": ["number", "null"], "minimum": 0, "maximum": 10},
+    "imdb_votes": {"type": ["integer", "null"], "minimum": 0},
+    "ref_version": {"type": "string", "pattern": "^[0-9]{8}-[0-9a-f]{8}$"},
+    "generated_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}
+  }
+}
