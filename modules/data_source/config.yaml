@@ -1,0 +1,13 @@
+movielens:
+  variant: ml-latest-small
+  required_files:
+    - ratings.csv
+    - movies.csv
+    - links.csv
+  optional_files:
+    - tags.csv
+
+imdb:
+  required_files:
+    - title.basics.tsv.gz
+    - title.ratings.tsv.gz
