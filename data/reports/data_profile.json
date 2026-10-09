@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-10-08T15:53:03Z",
+  "movielens_variant": "ml-latest-small",
+  "status": "PASS",
+  "sources": {
+    "ratings": {
+      "path": "data/raw/movielens/ml-latest-small/ratings.csv",
+      "row_count": 100836,
+      "missing_columns": [],
+      "distinct_user_count": 610,
+      "distinct_movie_count": 9724,
+      "min_rating": 0.5,
+      "max_rating": 5,
+      "min_timestamp": "1996-03-29T18:36:55+00:00",
+      "max_timestamp": "2018-09-24T14:27:30+00:00",
+      "invalid_user_id_count": 0,
+      "invalid_movie_id_count": 0,
+      "invalid_rating_count": 0,
+      "invalid_timestamp_count": 0
+    },
+    "movies": {
+      "path": "data/raw/movielens/ml-latest-small/movies.csv",
+      "row_count": 9742,
+      "missing_columns": [],
+      "distinct_movie_count": 9742,
+      "invalid_movie_id_count": 0,
+      "duplicate_movie_id_count": 0,
+      "empty_title_count": 0,
+      "empty_genres_count": 0,
+      "no_genres_listed_count": 34
+    },
+    "links": {
+      "path": "data/raw/movielens/ml-latest-small/links.csv",
+      "row_count": 9742,
+      "missing_columns": [],
+      "null_movie_id_count": 0,
+      "null_imdb_id_count": 0,
+      "null_tmdb_id_count": 8,
+      "distinct_movie_id_count": 9742
+    },
+    "imdb_basics": {
+      "path": "data/raw/imdb/title.basics.tsv.gz",
+      "missing_columns": [],
+      "row_count": 12835023,
+      "movie_title_count": 758438,
+      "null_counts": {
+        "tconst": 0,
+        "titleType": 0,
+        "primaryTitle": 25,
+        "startYear": 1484196,
+        "genres": 544233
+      }
+    },
+    "imdb_ratings": {
+      "path": "data/raw/imdb/title.ratings.tsv.gz",
+      "missing_columns": [],
+      "row_count": 1716686,
+      "null_counts": {
+        "tconst": 0,
+        "averageRating": 0,
+        "numVotes": 0
+      },
+      "invalid_average_rating_count": 0,
+      "invalid_num_votes_count": 0,
+      "min_average_rating": 1,
+      "max_average_rating": 10,
+      "min_num_votes": 5,
+      "max_num_votes": 3246652
+    }
+  },
+  "hard_failures": []
+}
