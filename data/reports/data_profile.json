@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-08T15:53:03Z",
+  "generated_at": "2026-10-10T09:39:20Z",
   "movielens_variant": "ml-latest-small",
   "status": "PASS",
   "sources": {
@@ -41,20 +41,20 @@
     "imdb_basics": {
       "path": "data/raw/imdb/title.basics.tsv.gz",
       "missing_columns": [],
-      "row_count": 12835023,
-      "movie_title_count": 758438,
+      "row_count": 12849947,
+      "movie_title_count": 759038,
       "null_counts": {
         "tconst": 0,
         "titleType": 0,
         "primaryTitle": 25,
-        "startYear": 1484196,
-        "genres": 544233
+        "startYear": 1484932,
+        "genres": 544584
       }
     },
     "imdb_ratings": {
       "path": "data/raw/imdb/title.ratings.tsv.gz",
       "missing_columns": [],
-      "row_count": 1716686,
+      "row_count": 1718968,
       "null_counts": {
         "tconst": 0,
         "averageRating": 0,
@@ -65,7 +65,7 @@
       "min_average_rating": 1,
       "max_average_rating": 10,
       "min_num_votes": 5,
-      "max_num_votes": 3246652
+      "max_num_votes": 3249821
     }
   },
   "hard_failures": []

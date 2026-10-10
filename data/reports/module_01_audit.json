@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-09T15:00:47Z",
+  "generated_at": "2026-10-10T09:40:35Z",
   "status": "PASS",
   "scope": "Module 01 local data preparation through Step 15",
   "checks": [
@@ -20,7 +20,7 @@
       "name": "canonical_reference_rebuilt_from_sources",
       "status": "PASS",
       "rows": 9742,
-      "ref_version": "20261004-5b4e04a2"
+      "ref_version": "20261010-01e56f1d"
     },
     {
       "name": "all_ratings_replay_contract_and_sort",

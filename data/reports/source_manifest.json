@@ -1,12 +1,12 @@
 {
-  "build_id": "20261008T155339Z",
+  "build_id": "20261010T094008Z",
   "movielens_variant": "ml-latest-small",
   "sources": [
     {
       "source_name": "MovieLens",
       "variant": "ml-latest-small",
       "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
-      "retrieved_at": "2026-10-04T10:22:28Z",
+      "retrieved_at": "2026-10-10T09:38:52Z",
       "archive_sha256": "696d65a3dfceac7c45750ad32df2c259311949efec81f0f144fdfb91ebc9e436",
       "files": [
         {
@@ -17,7 +17,7 @@
           "path": "data/raw/movielens/ml-latest-small/README.txt",
           "source_name": "MovieLens",
           "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
-          "retrieved_at": "2026-10-04T10:22:28Z"
+          "retrieved_at": "2026-10-10T09:38:52Z"
         },
         {
           "name": "links.csv",
@@ -27,7 +27,7 @@
           "path": "data/raw/movielens/ml-latest-small/links.csv",
           "source_name": "MovieLens",
           "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
-          "retrieved_at": "2026-10-04T10:22:28Z"
+          "retrieved_at": "2026-10-10T09:38:52Z"
         },
         {
           "name": "movies.csv",
@@ -37,7 +37,7 @@
           "path": "data/raw/movielens/ml-latest-small/movies.csv",
           "source_name": "MovieLens",
           "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
-          "retrieved_at": "2026-10-04T10:22:28Z"
+          "retrieved_at": "2026-10-10T09:38:52Z"
         },
         {
           "name": "ratings.csv",
@@ -47,7 +47,7 @@
           "path": "data/raw/movielens/ml-latest-small/ratings.csv",
           "source_name": "MovieLens",
           "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
-          "retrieved_at": "2026-10-04T10:22:28Z"
+          "retrieved_at": "2026-10-10T09:38:52Z"
         },
         {
           "name": "tags.csv",
@@ -57,33 +57,33 @@
           "path": "data/raw/movielens/ml-latest-small/tags.csv",
           "source_name": "MovieLens",
           "source_url": "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip",
-          "retrieved_at": "2026-10-04T10:22:28Z"
+          "retrieved_at": "2026-10-10T09:38:52Z"
         }
       ]
     },
     {
       "source_name": "IMDb",
-      "retrieved_at": "2026-10-04T10:46:23Z",
+      "retrieved_at": "2026-10-10T09:38:55Z",
       "files": [
         {
           "name": "title.basics.tsv.gz",
           "source_url": "https://datasets.imdbws.com/title.basics.tsv.gz",
-          "size_bytes": 228002230,
-          "sha256": "8a7415fd9dab0496a663d058247238c24e2899e8e43c2f7fcc53e5091b015eeb",
+          "size_bytes": 228296001,
+          "sha256": "6df0252f120f5b3df17a307bacec6e4149ac5568c70e36dd2f3e963f8c0b9cf8",
           "filename": "title.basics.tsv.gz",
           "path": "data/raw/imdb/title.basics.tsv.gz",
           "source_name": "IMDb",
-          "retrieved_at": "2026-10-04T10:46:23Z"
+          "retrieved_at": "2026-10-10T09:38:55Z"
         },
         {
           "name": "title.ratings.tsv.gz",
           "source_url": "https://datasets.imdbws.com/title.ratings.tsv.gz",
-          "size_bytes": 8672286,
-          "sha256": "892723243af1d27b48bf3757b72bd40efbe99c53caa7e72ab2a6fea9975c184a",
+          "size_bytes": 8684308,
+          "sha256": "08ecf9092c857afd3e492669ccac9561fbc14011aae1226fae3dd984125c5dd0",
           "filename": "title.ratings.tsv.gz",
           "path": "data/raw/imdb/title.ratings.tsv.gz",
           "source_name": "IMDb",
-          "retrieved_at": "2026-10-04T10:46:23Z"
+          "retrieved_at": "2026-10-10T09:38:55Z"
         }
       ],
       "source_url": "https://datasets.imdbws.com/"
@@ -91,17 +91,17 @@
     {
       "source_name": "TMDB",
       "source_url": "https://api.themoviedb.org/3/trending/movie/day",
-      "retrieved_at": "2026-10-08T10:44:04Z",
+      "retrieved_at": "2026-10-10T09:40:06Z",
       "files": [
         {
-          "filename": "snapshot_20261008T104404Z.jsonl",
-          "path": "data/prepared/tmdb/snapshot_20261008T104404Z.jsonl",
-          "size_bytes": 5803,
-          "sha256": "46fe8a6ed93c38a64bac8fa9421fe4d0ff14e466cf8d8b50dfc018a104c65894",
-          "name": "snapshot_20261008T104404Z.jsonl",
+          "filename": "snapshot_20261010T094006Z.jsonl",
+          "path": "data/prepared/tmdb/snapshot_20261010T094006Z.jsonl",
+          "size_bytes": 5815,
+          "sha256": "7426f3be757c032c5fae9f319d603901326e27dece8fb620225ca18160acb1cc",
+          "name": "snapshot_20261010T094006Z.jsonl",
           "source_name": "TMDB",
           "source_url": "https://api.themoviedb.org/3/trending/movie/day",
-          "retrieved_at": "2026-10-08T10:44:04Z",
+          "retrieved_at": "2026-10-10T09:40:06Z",
           "row_count": 20,
           "artifact_kind": "normalized_snapshot"
         }
@@ -111,12 +111,12 @@
   "reference": {
     "filename": "movie_reference.tsv",
     "path": "data/prepared/reference/movie_reference.tsv",
-    "size_bytes": 1159716,
-    "sha256": "975074c3bd5510a77ae883bc2f439ecc339f6615d6acf5e0161c2662a1789ccb",
+    "size_bytes": 1159717,
+    "sha256": "58fe7c24b814e85179fb8f9cc1fea608ea3d3d2fe9e6c766d26d3e2649ded490",
     "row_count": 9742,
-    "ref_version": "20261004-5b4e04a2",
-    "generated_at": "2026-10-04T11:47:24Z",
-    "source_hash": "5b4e04a25c4645450e0a98d665c34ff1498b456955a727dd14141cc551250b1a"
+    "ref_version": "20261010-01e56f1d",
+    "generated_at": "2026-10-10T09:39:37Z",
+    "source_hash": "01e56f1d83f59ee9a7231472d381a3d65ebbf9bdaf80676f2cd8940d00f00089"
   },
   "prepared": [
     {
@@ -132,15 +132,15 @@
       "filename": "movie-events.sample.jsonl",
       "path": "contracts/samples/movie-events.sample.jsonl",
       "size_bytes": 4739,
-      "sha256": "6dda1623d1f640cd392ffdee84844f893a6b81a1b6cfcc429e27827c554ac686",
+      "sha256": "e79d452b0138cfe2dc1be701c3a42c49b1e3f432dc21517c013b05613a539111",
       "row_count": 20,
       "schema": "contracts/schemas/movie-events.schema.json"
     },
     {
       "filename": "tmdb-snapshots.sample.jsonl",
       "path": "contracts/samples/tmdb-snapshots.sample.jsonl",
-      "size_bytes": 5803,
-      "sha256": "46fe8a6ed93c38a64bac8fa9421fe4d0ff14e466cf8d8b50dfc018a104c65894",
+      "size_bytes": 5815,
+      "sha256": "7426f3be757c032c5fae9f319d603901326e27dece8fb620225ca18160acb1cc",
       "row_count": 20,
       "schema": "contracts/schemas/tmdb-snapshots.schema.json"
     },
@@ -148,7 +148,7 @@
       "filename": "movie-reference.sample.tsv",
       "path": "contracts/samples/movie-reference.sample.tsv",
       "size_bytes": 2563,
-      "sha256": "dcaf93a7366e85565a2d09157ac0450fe922b431dcd3d47aaf5a56fcace1ddf0",
+      "sha256": "af1e8c03511e7c0895733d47717f721d40fb632c7349fbdb2d7a0852f9e3df90",
       "row_count": 20,
       "schema": "contracts/schemas/movie-reference.schema.json"
     }
