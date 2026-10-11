@@ -11,7 +11,7 @@ Query dùng **Spark SQL**; Dashboard đọc kết quả `analytics_*`.
 
 ## Trạng thái hiện tại
 
-Cập nhật ngày **08/10/2026**, dựa trên artifact và kiểm tra local:
+Cập nhật ngày **11/10/2026**, dựa trên artifact và kiểm tra local:
 
 | Hạng mục | Trạng thái |
 | --- | --- |
@@ -20,12 +20,13 @@ Cập nhật ngày **08/10/2026**, dựa trên artifact và kiểm tra local:
 | Replay input | 100.836 ratings, giữ nguyên nội dung và sắp theo timestamp nguồn. |
 | TMDB | Đã crawl thành công một snapshot 20 phim trending. |
 | Contract/fixtures | Ba schema v1.0 và ba fixture thật, mỗi fixture 20 record; sample join `movieId -> genres` chạy được local. |
-| Kiểm thử | 133 tests PASS; audit local PASS. Chi tiết và thời điểm chạy ở `data/reports/module_01_audit.json`. |
+| Kiểm thử | 169 tests Module 01/02 PASS, gồm 5 integration tests Kafka thật; [báo cáo](modules/kafka_ingestion/reports/acceptance.json). Audit Module 01 ở `data/reports/module_01_audit.json`. |
 | Contract nền | [DATA_CONTRACT.md](DATA_CONTRACT.md) đã có, vẫn là `1.0-draft`; chưa ghi nhận xác nhận freeze của nhóm. |
-| HDFS publish và handoff | Chờ HDFS endpoint/path và xác nhận consume của Module 2/4/5. |
-| Module 2–9 | Chưa có implementation hoặc bằng chứng chạy end-to-end trong repository này. |
+| HDFS publish và handoff | Module 02 đã consume thành công; còn chờ HDFS endpoint/path và handoff Module 4/5. |
+| Module 02 — Kafka ingestion | Producer/replay/consumer, reliability tests và benchmark đã chạy với Kafka thật. Smoke: 100 ratings + 20 TMDB API records hợp lệ, lag 0. [Chi tiết](modules/kafka_ingestion/README.md). |
+| Module 3–9 | Chưa có bằng chứng chạy toàn bộ pipeline end-to-end trong repository này. |
 
-**Giới hạn dữ liệu cần biết:** snapshot TMDB hiện tại có **0/20 phim** ánh
+**Giới hạn dữ liệu cần biết:** snapshot TMDB trong audit Module 01 có **0/20 phim** ánh
 xạ được vào reference MovieLens nhỏ. Nhánh TMDB giữ identity/timeline riêng
 và phải giữ record chưa có mapping. Không INNER JOIN rồi loại mất snapshot.
 
@@ -35,6 +36,7 @@ và phải giữ record chưa có mapping. Không INNER JOIN rồi loại mất 
 | --- | --- |
 | Hiểu interface toàn dự án | [DATA_CONTRACT.md](DATA_CONTRACT.md): schema, time semantics, paths, metric và ownership. |
 | Chạy hoặc tiếp nhận Module 01 | [modules/data_source/README.md](modules/data_source/README.md): setup, pipeline, artifacts, API và handoff. |
+| Chạy Kafka ingestion và integration tests | [modules/kafka_ingestion/README.md](modules/kafka_ingestion/README.md). |
 | Dùng sample để phát triển consumer | [contracts/README.md](contracts/README.md): schema, cách đọc JSONL/TSV, validation và smoke join. |
 | Xem kết quả đánh giá thiết kế | [REVIEW_MODULE_01.md](modules/data_source/REVIEW_MODULE_01.md). |
 

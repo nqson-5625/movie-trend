@@ -1,0 +1,101 @@
+{
+  "date_local": "2026-10-11",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "scope": "Module 01 -> Python producer -> real local Kafka -> validation consumer",
+  "prepared_ratings_sha256": "2d0cd09f050de47d821972388a01fd3568fe6ecdd155f9b7f63abf509693561b",
+  "movie_producer": {
+    "attempted": 100,
+    "acknowledged": 100,
+    "failed": 0,
+    "unconfirmed": 0,
+    "next_row": 100,
+    "elapsed_seconds": 1.7707209589998456,
+    "events_per_second": 56.47409411518192,
+    "interrupted": false
+  },
+  "tmdb_live_api": {
+    "event_time": "2026-10-11T08:25:36Z",
+    "acknowledged": 20,
+    "failed": 0,
+    "complete": true,
+    "source": "Live Module 01 fetch_trending_movies; primary host connection failed, official alternate host succeeded"
+  },
+  "consumer": {
+    "received": 120,
+    "valid": 120,
+    "invalid": 0,
+    "duplicate": 0,
+    "conflict": 0,
+    "offset_regressions": 0,
+    "offset_gaps": 0,
+    "latency_seconds_mean": 7.769230216666666,
+    "latency_seconds_max": 8.723719,
+    "lag": {
+      "movie-events:0": {
+        "low": 0,
+        "high": 100,
+        "committed": 100,
+        "lag": 0
+      },
+      "tmdb-snapshots:0": {
+        "low": 0,
+        "high": 20,
+        "committed": 20,
+        "lag": 0
+      }
+    },
+    "elapsed_seconds": 15.311217473999932,
+    "events_per_second": 7.837391128678872,
+    "interrupted": false
+  },
+  "trace_samples": [
+    {
+      "topic": "movie-events",
+      "partition": 0,
+      "offset": 0,
+      "key": "22",
+      "event": {
+        "schema_version": "1.0",
+        "event_id": "62a614d798323bfae660cb63c8c9f458969509d6a687c326daab5cba791952ba",
+        "source": "movielens",
+        "userId": 429,
+        "movieId": 22,
+        "rating": 4.0,
+        "event_time": "1996-03-29T18:36:55Z",
+        "ingest_time": "2026-10-11T08:25:33Z"
+      }
+    },
+    {
+      "topic": "tmdb-snapshots",
+      "partition": 0,
+      "offset": 0,
+      "key": "1148365",
+      "event": {
+        "schema_version": "1.0",
+        "event_id": "67fee8ee0901453c947a29cdda89f582a16704a7c3d8379b1f24c1c9e8454e26",
+        "source": "tmdb",
+        "tmdbId": 1148365,
+        "title": "Matchbox the Movie",
+        "popularity": 158.9482,
+        "vote_count": 151,
+        "vote_average": 7.864,
+        "event_time": "2026-10-11T08:25:36Z",
+        "ingest_time": "2026-10-11T08:25:36Z"
+      }
+    }
+  ],
+  "limitations": [
+    "Single broker, RF=1; no protection from disk loss",
+    "No HDFS/Spark/Elasticsearch end-to-end claim",
+    "Producer replay is at-least-once; downstream dedup required"
+  ],
+  "automated_tests": {
+    "passed": 169,
+    "failed": 0,
+    "skipped": 0,
+    "elapsed_seconds": 42.29,
+    "command": "RUN_KAFKA_INTEGRATION=1 .venv/bin/python -m pytest modules/data_source/tests modules/kafka_ingestion/tests -q --junitxml=modules/kafka_ingestion/reports/tests.xml",
+    "junit": "tests.xml",
+    "real_kafka_integration_tests": 5
+  }
+}
