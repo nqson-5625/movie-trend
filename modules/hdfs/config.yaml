@@ -1,26 +1,57 @@
+# ==============================================================================
+# CẤU HÌNH MODULE 03: HDFS STORAGE LAYER (Kubernetes Native)
+# Tuân thủ 100% DATA_CONTRACT.md (v1.0-draft)
+# Thiết kế chuyên biệt cho nền tảng Kubernetes (k3s trên VM 8GB RAM)
+# ==============================================================================
+
+# Cấu hình Kubernetes
+k8s:
+  namespace: "bigdata"
+  namenode_pod: "hdfs-namenode-0"
+  namenode_service: "hdfs-namenode-svc"
+  rpc_port: 9000
+  webhdfs_port: 9870
+  cluster_dns_default_fs: "hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000"
+  cluster_dns_webhdfs: "http://hdfs-namenode-svc.bigdata.svc.cluster.local:9870"
+  host_forward_webhdfs: "http://localhost:9870"
+
+# Quy chuẩn kỹ thuật HDFS (HDFS Policy)
 hdfs:
-  namenode:
-    rpc_host: "localhost"
-    rpc_port: 9000
-    webhdfs_port: 9870
-    container_name: "hdfs-namenode"
   replication: 2
-  block_size_bytes: 33554432 # 32 MB
+  block_size_bytes: 33554432 # 32 MB (Tối ưu RAM quản lý NameNode)
+  user: "root"
   paths:
+    # 1. Vùng Dữ liệu thô (Raw Zone - Append-only, Immutable)
     raw_ratings: "/raw/ratings"
     raw_tmdb: "/raw/tmdb"
-    quarantine: "/quarantine"
+    
+    # 2. Vùng Cách ly Lỗi (Quarantine Zone - Error Isolation)
+    quarantine_movielens: "/quarantine/movielens"
+    quarantine_tmdb: "/quarantine/tmdb"
+    
+    # 3. Vùng Dữ liệu Tham chiếu Chuẩn hóa (Canonical Reference Zone - Bước 16 Handoff)
+    ref_raw: "/movies/ref/raw"
     ref_current: "/movies/ref/current/movie_reference.tsv"
     ref_version_prefix: "/movies/ref/version="
+    
+    # 4. Vùng Batch Analytics (MapReduce Output Zone - Quyền 777)
     batch_root: "/batch"
+    batch_movie_stats: "/batch/movie_stats"
+    batch_movie_daily_stats: "/batch/movie_daily_stats"
+    batch_genre_daily_stats: "/batch/genre_daily_stats"
+    batch_meta: "/batch/_meta"
+    checkpoint_spark: "/checkpoint/spark"
 
+# Cấu hình kết nối Kafka (Module 02 -> Module 03 Ingestion)
 kafka:
   bootstrap_servers: "localhost:9092"
+  cluster_bootstrap_servers: "kafka-svc.bigdata.svc.cluster.local:9092"
+  group_id: "hdfs-sink-group"
   topics:
     movie_events: "movie-events"
     tmdb_snapshots: "tmdb-snapshots"
-  group_id: "hdfs-sink-group"
 
+# Cấu hình Ingestion Sink Daemon
 sink:
   batch_size: 500
   flush_interval_sec: 30

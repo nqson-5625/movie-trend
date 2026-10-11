@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hdfs-namenode-headless
+  namespace: bigdata
+  labels:
+    app: hdfs-namenode
+spec:
+  clusterIP: None
+  selector:
+    app: hdfs-namenode
+  ports:
+    - name: rpc
+      port: 9000
+    - name: web
+      port: 9870
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hdfs-namenode-svc
+  namespace: bigdata
+  labels:
+    app: hdfs-namenode
+spec:
+  type: ClusterIP
+  selector:
+    app: hdfs-namenode
+  ports:
+    - name: rpc
+      port: 9000
+      targetPort: 9000
+    - name: web
+      port: 9870
+      targetPort: 9870
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hdfs-namenode
+  namespace: bigdata
+  labels:
+    app: hdfs-namenode
+spec:
+  serviceName: hdfs-namenode-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hdfs-namenode
+  template:
+    metadata:
+      labels:
+        app: hdfs-namenode
+    spec:
+      initContainers:
+        - name: init-format-namenode
+          image: apache/hadoop:3.3.6
+          command:
+            - "bash"
+            - "-c"
+            - |
+              if [ ! -f /opt/hadoop/data/nameNode/current/VERSION ]; then
+                echo "Thư mục metadata NameNode trống. Đang khởi tạo format lần đầu..."
+                hdfs namenode -format -force -nonInteractive
+              else
+                echo "NameNode đã được format từ trước. Bỏ qua format để bảo toàn dữ liệu."
+              fi
+          volumeMounts:
+            - name: namenode-data
+              mountPath: /opt/hadoop/data/nameNode
+            - name: hdfs-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+              subPath: core-site.xml
+            - name: hdfs-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+              subPath: hdfs-site.xml
+      containers:
+        - name: namenode
+          image: apache/hadoop:3.3.6
+          command: ["hdfs", "namenode"]
+          env:
+            - name: HADOOP_HOME
+              value: "/opt/hadoop"
+            - name: HADOOP_NAMENODE_OPTS
+              value: "-Xms512m -Xmx768m -XX:+UseG1GC"
+          ports:
+            - containerPort: 9000
+              name: rpc
+            - containerPort: 9870
+              name: web
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          livenessProbe:
+            httpGet:
+              path: /dfshealth.html
+              port: 9870
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /dfshealth.html
+              port: 9870
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: namenode-data
+              mountPath: /opt/hadoop/data/nameNode
+            - name: hdfs-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+              subPath: core-site.xml
+            - name: hdfs-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+              subPath: hdfs-site.xml
+      volumes:
+        - name: hdfs-config-volume
+          configMap:
+            name: hdfs-config
+  volumeClaimTemplates:
+    - metadata:
+        name: namenode-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

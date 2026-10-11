@@ -1,0 +1,109 @@
+================================================================================
+          05. HƯỚNG DẪN CÀI ĐẶT VÀ TRIỂN KHAI CỤM HDFS TRÊN KUBERNETES
+================================================================================
+Người thực hiện: Giang
+Môi trường: Ubuntu Linux VM (8 GB RAM)
+Công nghệ: Kubernetes (k3s Lightweight Kubernetes)
+Kiến trúc: StatefulSets (1 NameNode + 2 DataNodes)
+Tài liệu kiến trúc chi tiết: docs/K8S_MIGRATION_GUIDE.md
+================================================================================
+
+1. NGUYÊN TẮC THIẾT KẾ CLOUD-NATIVE CHO HDFS TRÊN KUBERNETES:
+- Không dùng Minikube hoặc Kubeadm (vì chiếm dụng RAM node quá lớn).
+- Sử dụng k3s (Lightweight Kubernetes của Rancher), chỉ tốn ~500 MB RAM của máy ảo.
+- Quản lý trạng thái:
+  * NameNode triển khai qua `StatefulSet` kèm `Headless Service` (tên pod cố định `hdfs-namenode-0`).
+  * DataNodes triển khai qua `StatefulSet` (replicas: 2, pods `hdfs-datanode-0`, `hdfs-datanode-1`).
+- Quản lý lưu trữ:
+  * PersistentVolumeClaim (PVC) gắn qua StorageClass `local-path` mặc định của k3s.
+  * Tự động format an toàn: `initContainers` kiểm tra sự tồn tại của `fsimage/VERSION`,
+    chỉ format NameNode lần đầu, tuyệt đối không format lại làm mất metadata khi Pod restart.
+- Quản lý cấu hình:
+  * Cấu hình tập trung bằng `ConfigMap: hdfs-config` (`core-site.xml`, `hdfs-site.xml`).
+  * Block size 32 MB, Replication factor 2.
+- Giới hạn RAM khắt khe:
+  * NameNode: JVM Heap -Xms512m -Xmx768m (K8s Memory Limit 1024Mi).
+  * DataNode: Mỗi Pod JVM Heap -Xms256m -Xmx384m (K8s Memory Limit 512Mi).
+  * Tổng RAM cả cụm HDFS luôn <= 1.5 GB.
+
+--------------------------------------------------------------------------------
+2. CẤU TRÚC TỆP TIN MANIFEST KUBERNETES (Thư mục modules/hdfs/k8s/):
+--------------------------------------------------------------------------------
+- `00-namespace.yaml`: Khởi tạo namespace `bigdata`.
+- `01-configmap.yaml`: Cấu hình `core-site.xml` và `hdfs-site.xml`.
+- `02-namenode.yaml`: Headless Service, Client Service (RPC 9000, UI 9870), StatefulSet + PVC 5Gi.
+- `03-datanode.yaml`: Headless Service, StatefulSet 2 replicas + volumeClaimTemplates 10Gi.
+- `kustomization.yaml`: Quản lý triển khai tập trung qua `kubectl apply -k .`.
+
+--------------------------------------------------------------------------------
+3. HƯỚNG DẪN CÀI ĐẶT VÀ VẬN HÀNH TỪNG BƯỚC:
+--------------------------------------------------------------------------------
+
+Bước 1: Cài đặt k3s siêu tốc trên Ubuntu VM (nếu chưa có):
+```bash
+curl -sfL https://get.k3s.io | sh -
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+kubectl get nodes
+```
+
+Bước 2: Triển khai cụm HDFS lên Kubernetes:
+```bash
+# Từ thư mục gốc dự án:
+make -C modules/hdfs up
+
+# Hoặc di chuyển vào thư mục modules/hdfs:
+cd modules/hdfs && make up
+```
+
+Bước 3: Kiểm tra trạng thái Pods và PVCs:
+```bash
+make status
+```
+Kết quả mong đợi:
+- `hdfs-namenode-0`: 1/1 Running
+- `hdfs-datanode-0`: 1/1 Running
+- `hdfs-datanode-1`: 1/1 Running
+- PVCs `namenode-data` và `datanode-data` đều ở trạng thái `Bound`.
+
+Bước 4: Kiểm tra báo cáo cụm:
+```bash
+make report
+```
+Kết quả cần thấy: `Live datanodes (2)`, SafeMode: OFF.
+
+Bước 5: Khởi tạo toàn bộ cấu trúc thư mục chuẩn và phân quyền:
+```bash
+make init
+```
+Tạo các thư mục: `/raw`, `/quarantine`, `/movies/ref/current`, `/batch` (quyền 777).
+
+Bước 6: Nghiệm thu bàn giao Bước 16 (Publish Canonical Reference):
+```bash
+make publish-ref
+```
+
+Bước 7: Kiểm tra môi trường sẵn sàng cho Module 04 MapReduce:
+```bash
+make verify-mr
+```
+
+Bước 8: Truy cập Web UI từ trình duyệt máy Host:
+```bash
+make forward
+```
+Mở trình duyệt truy cập: `http://localhost:9870`
+
+--------------------------------------------------------------------------------
+4. WORKFLOW MỘT CHẠM CHO NGƯỜI CHẠY CUỐI CÙNG (ONE-CLICK PIPELINE):
+--------------------------------------------------------------------------------
+Chỉ cần chạy 1 lệnh duy nhất để tự động thực hiện từ Bước 2 đến Bước 7:
+```bash
+make pipeline
+```
+Kiểm tra lại sức khỏe toàn diện và chạy kiểm thử tự động:
+```bash
+make verify
+```
+================================================================================

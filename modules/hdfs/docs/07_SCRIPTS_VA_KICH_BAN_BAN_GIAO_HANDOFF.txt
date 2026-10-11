@@ -3,26 +3,34 @@
 ================================================================================
 Người thực hiện: Giang
 Mục tiêu: Cung cấp bộ công cụ tự động hóa khởi tạo HDFS, bàn giao Module 01 (Bước 16)
-và chuẩn bị môi trường cho Module 04 (MapReduce).
+và chuẩn bị môi trường cho Module 04 (MapReduce) trên Kubernetes (k3s).
 ================================================================================
 
 --------------------------------------------------------------------------------
 1. SCRIPT KHỞI TẠO CẤU TRÚC HDFS: `init_hdfs_dirs.sh`
 --------------------------------------------------------------------------------
 
-Script này chạy một lần sau khi khởi động cụm HDFS để tạo toàn bộ cây thư mục chuẩn.
-Có thể chạy trực tiếp trên máy chủ Ubuntu (qua docker exec):
+Script này chạy sau khi cụm HDFS khởi động để tạo toàn bộ cây thư mục chuẩn.
+Thực thi trực tiếp trong Pod NameNode thông qua `kubectl exec`:
 
 ```bash
 #!/usr/bin/env bash
 # init_hdfs_dirs.sh - Khởi tạo cây thư mục chuẩn cho dự án Movie-Trend
 set -euo pipefail
 
-CONTAINER_NAME=${1:-hdfs-namenode}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/../.env" ]; then
+    set -a; source "$SCRIPT_DIR/../.env"; set +a
+elif [ -f "$SCRIPT_DIR/../../../.env" ]; then
+    set -a; source "$SCRIPT_DIR/../../../.env"; set +a
+fi
 
-echo "=== [MODULE 03] KHỞI TẠO CẤU TRÚC THƯ MỤC TRÊN HDFS ==="
+K8S_NAMESPACE=${K8S_NAMESPACE:-bigdata}
+K8S_POD_NAME=${K8S_POD_NAME:-hdfs-namenode-0}
 
-docker exec -i "$CONTAINER_NAME" bash << 'EOF'
+echo "=== [MODULE 03] KHỞI TẠO CẤU TRÚC THƯ MỤC TRÊN HDFS (Kubernetes) ==="
+
+HDFS_INIT_COMMANDS=$(cat << 'EOF'
 set -x
 
 # 1. Tạo các thư mục Vùng Dữ liệu Thô (Raw Zone)
@@ -59,135 +67,37 @@ hdfs dfs -ls /raw
 hdfs dfs -ls /movies
 hdfs dfs -ls /batch
 EOF
+)
 
-echo "=== [MODULE 03] HOÀN TẤT KHỞI TẠO CẤU TRÚC THƯ MỤC! ==="
+echo "Thực thi trên Kubernetes Pod: $K8S_POD_NAME (Namespace: $K8S_NAMESPACE)"
+echo "$HDFS_INIT_COMMANDS" | kubectl exec -i -n "$K8S_NAMESPACE" pod/"$K8S_POD_NAME" -- bash
 ```
+
+Cách thực thi:
+- Gọi qua Make: `make init`
+- Hoặc gọi trực tiếp: `bash scripts/init_hdfs_dirs.sh`
 
 --------------------------------------------------------------------------------
 2. SCRIPT THỰC HIỆN BÀN GIAO BƯỚC 16 VỚI MODULE 01: `publish_reference.py`
 --------------------------------------------------------------------------------
 
 Script này giải quyết trọn vẹn điểm nghẽn "Bước 16: Chờ HDFS endpoint/path để publish 
-reference" được nêu trong tài liệu của Module 01.
+reference". Script thực hiện:
+- Kiểm tra tính sẵn sàng của cụm K8s (chẩn đoán lỗi Pod/SafeMode thân thiện).
+- Đọc file `movie_reference.tsv` từ `data/prepared/reference/` (hoặc sample).
+- Tính checksum SHA256 và đếm số dòng (9.743 dòng = 9.742 phim + 1 header).
+- Sao chép vào NameNode Pod bằng `kubectl cp`.
+- Tải lên HDFS version path: `/movies/ref/version=<ref_version>/movie_reference.tsv`.
+- Xác nhận số dòng trên HDFS khớp 100% với file local.
+- Cập nhật atomic sang canonical path: `/movies/ref/current/movie_reference.tsv`.
 
-Mã nguồn Python thực hiện:
-- Đọc file `data/prepared/reference/movie_reference.tsv` và `manifest.json`.
-- Xác định `ref_version` (ví dụ `20261004-5b4e04a2`).
-- Đẩy lên HDFS tại `/movies/ref/version=<ref_version>/`.
-- Kiểm tra checksum SHA256 và đếm số dòng (9.743 dòng) trên HDFS.
-- Cập nhật atomic sang `/movies/ref/current/movie_reference.tsv`.
+Cách thực thi:
+- Gọi qua Make: `make publish-ref`
+- Hoặc chạy script: `python scripts/publish_reference.py`
 
-```python
-#!/usr/bin/env python3
-"""
-publish_reference.py - Handoff Step 16 for Module 01 & 03
-Phụ trách: Giang (Module 03 - HDFS)
-"""
-
-import hashlib
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-# Đường dẫn file nguồn local
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # Thư mục BTL
-LOCAL_REF_DIR = PROJECT_ROOT / "data" / "prepared" / "reference"
-LOCAL_REF_FILE = LOCAL_REF_DIR / "movie_reference.tsv"
-LOCAL_MANIFEST_FILE = LOCAL_REF_DIR / "manifest.json"
-
-HDFS_NAMENODE_CONTAINER = os.getenv("HDFS_CONTAINER", "hdfs-namenode")
-
-
-def calculate_sha256(filepath: Path) -> str:
-    hasher = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        while chunk := f.read(65536):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def count_lines(filepath: Path) -> int:
-    with open(filepath, "r", encoding="utf-8") as f:
-        return sum(1 for _ in f)
-
-
-def run_hdfs_cmd(cmd: list[str]) -> str:
-    full_cmd = ["docker", "exec", "-i", HDFS_NAMENODE_CONTAINER, "hdfs", "dfs"] + cmd
-    res = subprocess.run(full_cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        raise RuntimeError(f"Lỗi lệnh HDFS ({' '.join(cmd)}): {res.stderr.strip()}")
-    return res.stdout.strip()
-
-
-def main():
-    print("=== [BƯỚC 16] PUBLISH CANONICAL MOVIE REFERENCE LÊN HDFS ===")
-
-    # Nếu chưa chạy full pipeline của Module 1, fallback dùng sample để test
-    ref_file = LOCAL_REF_FILE
-    if not ref_file.exists():
-        print(f"Cảnh báo: Không tìm thấy {ref_file}. Dùng file sample để test bàn giao...")
-        ref_file = PROJECT_ROOT / "contracts" / "samples" / "movie-reference.sample.tsv"
-
-    if not ref_file.exists():
-        print(f"Lỗi: Không tìm thấy file reference tại {ref_file}")
-        sys.exit(1)
-
-    local_lines = count_lines(ref_file)
-    local_hash = calculate_sha256(ref_file)
-    print(f"-> File local: {ref_file.name}")
-    print(f"-> Tổng số dòng: {local_lines}")
-    print(f"-> Checksum SHA256: {local_hash}")
-
-    ref_version = "20261004-5b4e04a2"
-    if LOCAL_MANIFEST_FILE.exists():
-        with open(LOCAL_MANIFEST_FILE, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-            ref_version = manifest.get("ref_version", ref_version)
-
-    print(f"-> Phiên bản reference (ref_version): {ref_version}")
-
-    version_dir = f"/movies/ref/version={ref_version}"
-    current_dir = "/movies/ref/current"
-
-    # 1. Tạo thư mục version trên HDFS
-    print(f"1. Tạo thư mục version: {version_dir}")
-    run_hdfs_cmd(["-mkdir", "-p", version_dir])
-
-    # 2. Copy file vào container rồi put lên HDFS
-    print("2. Đẩy file lên HDFS version path...")
-    tmp_container_path = "/tmp/movie_reference.tsv"
-    subprocess.run(["docker", "cp", str(ref_file), f"{HDFS_NAMENODE_CONTAINER}:{tmp_container_path}"], check=True)
-    run_hdfs_cmd(["-put", "-f", tmp_container_path, f"{version_dir}/movie_reference.tsv"])
-
-    # 3. Kiểm tra số dòng trên HDFS
-    print("3. Kiểm tra số dòng trên HDFS...")
-    hdfs_count_out = run_hdfs_cmd(["-cat", f"{version_dir}/movie_reference.tsv"])
-    hdfs_lines = len(hdfs_count_out.splitlines())
-    if hdfs_lines != local_lines:
-        print(f"THẤT BẠI: Số dòng không khớp! Local: {local_lines}, HDFS: {hdfs_lines}")
-        sys.exit(1)
-    print(f"-> Khớp số dòng: {hdfs_lines} dòng.")
-
-    # 4. Cập nhật Atomic sang /movies/ref/current/
-    print(f"4. Cập nhật canonical path: {current_dir}/movie_reference.tsv")
-    run_hdfs_cmd(["-mkdir", "-p", current_dir])
-    run_hdfs_cmd(["-cp", "-f", f"{version_dir}/movie_reference.tsv", f"{current_dir}/movie_reference.tsv"])
-
-    # 5. Xác nhận trạng thái cuối cùng
-    print("5. Danh sách file trong /movies/ref/current/:")
-    print(run_hdfs_cmd(["-ls", current_dir]))
-
-    print("\n=======================================================")
-    print(" XÁC NHẬN BÀN GIAO BƯỚC 16 THÀNH CÔNG!")
-    print(f" Canonical Entrypoint: hdfs://namenode:9000{current_dir}/movie_reference.tsv")
-    print("=======================================================")
-
-
-if __name__ == "__main__":
-    main()
-```
+Canonical Entrypoint công bố:
+- Trong cụm K8s: `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/movies/ref/current/movie_reference.tsv`
+- Ngoài cụm (qua Port-forward): `hdfs://localhost:9000/movies/ref/current/movie_reference.tsv`
 
 --------------------------------------------------------------------------------
 3. SCRIPT BÀN GIAO VÀ KIỂM TRA CHO MODULE 04 (MAPREDUCE): `verify_mapreduce_handoff.sh`
@@ -195,32 +105,21 @@ if __name__ == "__main__":
 
 Script này giúp Đỗ Sơn (Module 04) kiểm tra xem HDFS đã sẵn sàng cung cấp input 
 và nhận output chưa:
+- Kiểm tra sự tồn tại của `/movies/ref/current/movie_reference.tsv`.
+- Kiểm tra thư mục `/raw/ratings/`.
+- Thử nghiệm quyền ghi vào `/batch/` (phải đạt quyền 777).
 
+Cách thực thi:
+- Gọi qua Make: `make verify-mr`
+- Hoặc chạy script: `bash scripts/verify_mapreduce_handoff.sh`
+
+--------------------------------------------------------------------------------
+4. WORKFLOW MỘT CHẠM CHO NGƯỜI CHẠY CUỐI CÙNG (ONE-CLICK PIPELINE):
+--------------------------------------------------------------------------------
+
+Để người chạy cuối cùng không phải gọi từng lệnh đơn lẻ, chạy lệnh tổng hợp:
 ```bash
-#!/usr/bin/env bash
-# verify_mapreduce_handoff.sh
-set -euo pipefail
-
-CONTAINER_NAME=${1:-hdfs-namenode}
-
-echo "=== [MODULE 03 -> MODULE 04] KIỂM TRA MÔI TRƯỜNG CHO HADOOP MAPREDUCE ==="
-
-docker exec -i "$CONTAINER_NAME" bash << 'EOF'
-echo "1. Kiểm tra Canonical Movie Reference:"
-if hdfs dfs -test -e /movies/ref/current/movie_reference.tsv; then
-    echo "  [OK] Đã có /movies/ref/current/movie_reference.tsv"
-    echo "  Xem trước 3 dòng đầu:"
-    hdfs dfs -cat /movies/ref/current/movie_reference.tsv | head -n 3
-else
-    echo "  [LỖI] Chưa có file reference! Cần chạy Bước 16 trước."
-fi
-
-echo "2. Kiểm tra Vùng Dữ liệu Thô (Raw Ratings):"
-hdfs dfs -ls /raw/ratings/ || echo "  [LƯU Ý] Chưa có partition nào trong /raw/ratings/"
-
-echo "3. Kiểm tra Quyền ghi vào thư mục Batch Output:"
-hdfs dfs -ls -d /batch
-echo "  [OK] Thư mục /batch đã được mở quyền cho MapReduce."
-EOF
+make pipeline
 ```
+Lệnh này sẽ tự động: `up` -> `init` -> `publish-ref` -> `verify-mr`.
 ================================================================================

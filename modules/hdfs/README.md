@@ -4,8 +4,9 @@ Tầng lưu trữ phân tán (**Distributed Storage Layer**) cho dữ liệu th�
 
 - **Phụ trách (Owner):** Giang  
 - **Vị trí hệ thống:** `modules/hdfs`  
-- **Môi trường mục tiêu:** 01 Ubuntu VM (8 GB RAM), triển khai bằng **Docker Compose** hoặc **Kubernetes (k3s)**.  
+- **Môi trường mục tiêu:** 01 Ubuntu VM (8 GB RAM), triển khai trên **Kubernetes (k3s)** (Kiến trúc Cloud-Native).  
 - **Hợp đồng dữ liệu:** Tuân thủ 100% [DATA_CONTRACT.md](../../DATA_CONTRACT.md) (v1.0-draft).
+- **Tài liệu kiến trúc K8s:** [docs/K8S_MIGRATION_GUIDE.md](docs/K8S_MIGRATION_GUIDE.md).
 
 ---
 
@@ -19,7 +20,7 @@ flowchart TD
     M2[Module 02: Kafka Producer] --> KAFKA[Kafka Broker]
     KAFKA -- Ingestion Sink Daemon --> HDFS_RAW["/raw/ratings/dt=YYYY-MM-DD/\n/raw/tmdb/dt=YYYY-MM-DD/"]
     
-    subgraph HDFS Cluster [Cụm HDFS: 1 NameNode + 2 DataNodes]
+    subgraph HDFS Cluster [Cụm HDFS Kubernetes k3s: 1 NameNode StatefulSet + 2 DataNodes StatefulSet]
         HDFS_RAW
         HDFS_REF
         HDFS_QUARANTINE["/quarantine/ (Dữ liệu lỗi)"]
@@ -47,27 +48,33 @@ flowchart TD
 modules/hdfs/
 ├── README.md                           # Tài liệu tổng quan Module 03
 ├── HANDOFF_MODULE_03.md                # Tài liệu đặc tả nghiệm thu & bàn giao các bên
-├── TROUBLESHOOTING.md                  # Cẩm nang tra cứu và xử lý sự cố nhanh
-├── Makefile                            # Các lệnh điều khiển tự động (make up, make init,...)
-├── config.yaml                         # Cấu hình tham số endpoints và đường dẫn
-├── requirements.txt                    # Thư viện phụ thuộc Python (hdfs, kafka-python)
+├── TROUBLESHOOTING.md                  # Cẩm nang tra cứu và xử lý sự cố nhanh trên Kubernetes
+├── Makefile                            # Các lệnh điều khiển tự động (make up, make pipeline,...)
+├── config.yaml                         # Cấu hình tham số endpoints và đường dẫn Kubernetes
+├── .env.example                        # Biến môi trường mẫu cho Kubernetes (port, namespace,...)
+├── requirements.txt                    # Thư viện phụ thuộc Python (hdfs, kafka-python, pyyaml)
 │
-├── docker/
-│   └── docker-compose.yml              # File triển khai cụm 1 NameNode + 2 DataNodes tối ưu 8GB RAM
+├── k8s/                                # Thư mục Manifests Kubernetes (k3s)
+│   ├── 00-namespace.yaml               # Namespace bigdata
+│   ├── 01-configmap.yaml               # core-site.xml, hdfs-site.xml
+│   ├── 02-namenode.yaml                # NameNode StatefulSet + Services + PVC 5Gi + InitContainer
+│   ├── 03-datanode.yaml                # DataNode StatefulSet (2 replicas) + volumeClaimTemplates 10Gi
+│   └── kustomization.yaml              # Quản lý triển khai tập trung Kustomize
 │
 ├── scripts/
-│   ├── init_hdfs_dirs.sh               # Script tự động tạo cây thư mục và phân quyền HDFS
+│   ├── init_hdfs_dirs.sh               # Script tự động tạo cây thư mục và phân quyền HDFS Pod
 │   ├── publish_reference.py            # Script thực hiện bàn giao Bước 16 với Module 01
 │   ├── kafka_hdfs_sink.py              # Ingestion Daemon kéo dữ liệu từ Kafka vào HDFS
 │   └── verify_mapreduce_handoff.sh     # Script kiểm tra môi trường cho Module 04 MapReduce
 │
-└── docs/                               # Bộ tài liệu kỹ thuật chi tiết (.txt)
+└── docs/                               # Bộ tài liệu kỹ thuật chi tiết
+    ├── K8S_MIGRATION_GUIDE.md          # TÀI LIỆU KIẾN TRÚC & TRIỂN KHAI KUBERNETES
     ├── 00_DANH_MUC_TAI_LIEU_MODULE_3.txt
     ├── 01_TONG_QUAN_VA_PHAN_TICH_YEU_CAU.txt
     ├── 02_HOP_DONG_DU_LIEU_VA_GIAO_TIEP_MODULE_3.txt
     ├── 03_THIET_KE_KIEN_TRUC_LUU_TRU_VA_TAI_NGUYEN.txt
     ├── 04_KE_HOACH_THUC_HIEN_VA_CHECKLIST_TIEN_DO.txt
-    ├── 05_HUONG_DAN_CAI_DAT_DOCKER_VA_K8S.txt
+    ├── 05_HUONG_DAN_CAI_DAT_K8S.txt
     ├── 06_GIAI_PHAP_KAFKA_TO_HDFS_SINK.txt
     ├── 07_SCRIPTS_VA_KICH_BAN_BAN_GIAO_HANDOFF.txt
     ├── 08_KICH_BAN_KIEM_THU_ACCEPTANCE_TEST.txt
@@ -97,8 +104,8 @@ modules/hdfs/
 
 Toàn bộ hệ thống chạy chung trên 01 VM Ubuntu 8 GB RAM. Để đảm bảo Linux OOM Killer không tắt bất kỳ tiến trình nào, Module 03 áp dụng cấu hình tài nguyên nghiêm ngặt:
 
-- **HDFS NameNode:** JVM Heap `-Xms512m -Xmx768m` (Tối đa 1.0 GB container RAM).
-- **HDFS DataNode 1 & 2:** Mỗi container JVM Heap `-Xms256m -Xmx384m` (Tối đa 512 MB container RAM).
+- **HDFS NameNode (Pod `hdfs-namenode-0`):** JVM Heap `-Xms512m -Xmx768m` (K8s Memory Limit: 1024Mi).
+- **HDFS DataNodes (Pods `hdfs-datanode-0`, `hdfs-datanode-1`):** Mỗi Pod JVM Heap `-Xms256m -Xmx384m` (K8s Memory Limit: 512Mi).
 - **HDFS Block Size:** `32 MB` (thay vì 128 MB mặc định) giúp chia block nhanh và tiết kiệm bộ nhớ quản lý của NameNode.
 - **Replication Factor:** `2` (đảm bảo tính dự phòng trên 2 DataNodes mà không gây áp lực ổ đĩa).
 - **Tổng RAM tiêu thụ của cả cụm HDFS:** $\le 1.5\text{ GB RAM}$, dành lại hơn 6.5 GB RAM cho Kafka, Spark, Elasticsearch và OS.
@@ -107,67 +114,86 @@ Toàn bộ hệ thống chạy chung trên 01 VM Ubuntu 8 GB RAM. Để đảm b
 
 ## 5. Hướng dẫn vận hành nhanh (Quickstart với Makefile)
 
-Di chuyển vào thư mục `modules/hdfs`:
+Toàn bộ các lệnh dưới đây có thể chạy trực tiếp từ thư mục gốc của repository hoặc trong thư mục `modules/hdfs`:
 
 ```bash
-cd modules/hdfs
+# Xem danh sách tất cả các lệnh hỗ trợ:
+make -C modules/hdfs help
 ```
 
-### 1. Khởi động cụm HDFS
-```bash
-make up
-```
-*Khởi chạy 1 NameNode và 2 DataNodes. Kiểm tra Web UI tại [http://localhost:9870](http://localhost:9870).*
+### 5.1. Quy trình một chạm (One-click Pipeline — Khuyến nghị)
+Đây là cách nhanh nhất và tiện lợi nhất cho người chạy cuối cùng:
 
-### 2. Khởi tạo cấu trúc thư mục chuẩn
 ```bash
-make init
-```
-*Tự động tạo các thư mục `/raw`, `/quarantine`, `/movies/ref`, `/batch` và phân quyền 777.*
+# Bước 1: Khởi tạo môi trường ảo và file cấu hình cá nhân .env (nếu chạy lần đầu)
+make -C modules/hdfs setup env
 
-### 3. Nghiệm thu bàn giao Bước 16 (Publish Canonical Reference)
-```bash
-make publish-ref
-```
-*Tải `movie_reference.tsv`, đối chiếu số dòng (9.743 dòng), kiểm tra mã băm SHA256 và cập nhật `/movies/ref/current/`.*
+# Bước 2: Chạy toàn bộ pipeline Kubernetes
+# (Triển khai K8s -> Chờ NameNode Ready -> Khởi tạo cây thư mục -> Publish Reference -> Verify MapReduce)
+make -C modules/hdfs pipeline
 
-### 4. Kiểm tra sẵn sàng cho Module 04 MapReduce
-```bash
-make verify-mr
-```
-
-### 5. Chạy Ingestion Sink kéo dữ liệu từ Kafka xuống HDFS
-```bash
-make run-sink
-```
-
-### 6. Kiểm tra báo cáo cụm và đo RAM
-```bash
-make report
-make stats
-```
-
-### 7. Dừng cụm HDFS
-```bash
-make down
+# Bước 3: Kiểm tra sức khỏe toàn diện cụm và chạy 8 test cases tự động
+make -C modules/hdfs verify
 ```
 
 ---
 
-## 6. Endpoints công bố toàn nhóm
+### 5.2. Các thao tác chi tiết trên Kubernetes k3s
 
-- **NameNode RPC:** `hdfs://localhost:9000` (hoặc `hdfs://namenode:9000` trong Docker network `bigdata-net`)
-- **WebHDFS REST API:** `http://localhost:9870/webhdfs/v1`
-- **NameNode Web UI:** `http://localhost:9870`
-- **DataNode 1 Web UI:** `http://localhost:9864`
-- **DataNode 2 Web UI:** `http://localhost:9865`
+```bash
+# 1. Triển khai cụm HDFS lên Kubernetes (namespace: bigdata)
+make -C modules/hdfs up
+
+# 2. Xem trạng thái Pods, Services, PVCs và báo cáo dung lượng
+make -C modules/hdfs status
+make -C modules/hdfs report
+
+# 3. Khởi tạo cấu trúc thư mục chuẩn (/raw, /quarantine, /movies, /batch)
+make -C modules/hdfs init
+
+# 4. Nghiệm thu bàn giao Bước 16 (Publish Canonical Reference lên K8s)
+make -C modules/hdfs publish-ref
+
+# 5. Kiểm tra môi trường cho Module 04 MapReduce
+make -C modules/hdfs verify-mr
+
+# 6. Forward port để xem Web UI tại http://localhost:9870
+make -C modules/hdfs forward
+
+# 7. Đo lường RAM/CPU tiêu thụ thực tế của cụm HDFS
+make -C modules/hdfs stats
+
+# 8. Khởi chạy Ingestion Daemon lắng nghe Kafka đẩy vào HDFS
+make -C modules/hdfs sink
+
+# 9. Chạy bộ kiểm thử tự động (16 test cases Module 01-03 và Kafka-HDFS Sink)
+make -C modules/hdfs test
+make -C modules/hdfs test-sink
+
+# 10. Dừng cụm khi không sử dụng
+make -C modules/hdfs down
+```
+
+---
+
+## 6. Endpoints công bố toàn nhóm (Kubernetes Native)
+
+- **NameNode RPC nội bộ cụm (DefaultFS cho MapReduce/Spark):**  
+  `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000`
+- **WebHDFS REST API nội bộ cụm:**  
+  `http://hdfs-namenode-svc.bigdata.svc.cluster.local:9870/webhdfs/v1`
+- **Truy cập từ Host (qua Port-Forward `make forward`):**
+  - NameNode RPC: `hdfs://localhost:9000`
+  - NameNode Web UI: `http://localhost:9870`
 
 ---
 
 ## 7. Tài liệu tham khảo chi tiết
 
 Mọi câu hỏi chuyên sâu về kiến trúc, hợp đồng dữ liệu và quy trình bảo trì, vui lòng xem các file tương ứng trong thư mục [docs/](docs/):
+- **TÀI LIỆU KIẾN TRÚC KUBERNETES:** [docs/K8S_MIGRATION_GUIDE.md](docs/K8S_MIGRATION_GUIDE.md) *(Đọc tài liệu này đầu tiên)*
 - Xem [docs/01_TONG_QUAN_VA_PHAN_TICH_YEU_CAU.txt](docs/01_TONG_QUAN_VA_PHAN_TICH_YEU_CAU.txt) để nắm phạm vi trách nhiệm.
 - Xem [docs/06_GIAI_PHAP_KAFKA_TO_HDFS_SINK.txt](docs/06_GIAI_PHAP_KAFKA_TO_HDFS_SINK.txt) để xem kiến trúc Sink Daemon.
 - Xem [docs/08_KICH_BAN_KIEM_THU_ACCEPTANCE_TEST.txt](docs/08_KICH_BAN_KIEM_THU_ACCEPTANCE_TEST.txt) để thực thi 7 kịch bản kiểm thử mẫu.
 - Xem [docs/09_VAN_HANH_BAO_TRI_VA_XU_LY_SU_CO.txt](docs/09_VAN_HANH_BAO_TRI_VA_XU_LY_SU_CO.txt) để xử lý các mã lỗi HDFS.
+- Xem [TROUBLESHOOTING.md](TROUBLESHOOTING.md) để tra cứu nhanh sự cố Pods, SafeMode, PVCs.

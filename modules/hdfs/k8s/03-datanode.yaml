@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hdfs-datanode-headless
+  namespace: bigdata
+  labels:
+    app: hdfs-datanode
+spec:
+  clusterIP: None
+  selector:
+    app: hdfs-datanode
+  ports:
+    - name: web
+      port: 9864
+    - name: xfer
+      port: 9866
+    - name: ipc
+      port: 9867
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hdfs-datanode
+  namespace: bigdata
+  labels:
+    app: hdfs-datanode
+spec:
+  serviceName: hdfs-datanode-headless
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hdfs-datanode
+  template:
+    metadata:
+      labels:
+        app: hdfs-datanode
+    spec:
+      containers:
+        - name: datanode
+          image: apache/hadoop:3.3.6
+          command: ["hdfs", "datanode"]
+          env:
+            - name: HADOOP_HOME
+              value: "/opt/hadoop"
+            - name: HADOOP_DATANODE_OPTS
+              value: "-Xms256m -Xmx384m -XX:+UseG1GC"
+          ports:
+            - containerPort: 9864
+              name: web
+            - containerPort: 9866
+              name: xfer
+            - containerPort: 9867
+              name: ipc
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            tcpSocket:
+              port: 9864
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 9864
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: datanode-data
+              mountPath: /opt/hadoop/data/dataNode
+            - name: hdfs-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+              subPath: core-site.xml
+            - name: hdfs-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+              subPath: hdfs-site.xml
+      volumes:
+        - name: hdfs-config-volume
+          configMap:
+            name: hdfs-config
+  volumeClaimTemplates:
+    - metadata:
+        name: datanode-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-hdfs-sink
+  namespace: bigdata
+  labels:
+    app: kafka-hdfs-sink
+    app.kubernetes.io/part-of: movie-trend-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-hdfs-sink
+  template:
+    metadata:
+      labels:
+        app: kafka-hdfs-sink
+    spec:
+      containers:
+      - name: sink-daemon
+        image: python:3.12-slim
+        command:
+        - bash
+        - -c
+        - |
+          pip install --no-cache-dir confluent-kafka jsonschema requests
+          python /app/scripts/kafka_hdfs_sink.py
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-svc.bigdata.svc.cluster.local:9092"
+        - name: KAFKA_GROUP_ID
+          value: "hdfs-sink-group"
+        - name: WEBHDFS_URL
+          value: "http://hdfs-namenode-svc.bigdata.svc.cluster.local:9870"
+        - name: K8S_NAMENODE_POD
+          value: "hdfs-namenode-0"
+        - name: K8S_NAMESPACE
+          value: "bigdata"
+        - name: SINK_BATCH_SIZE
+          value: "200"
+        - name: SINK_FLUSH_INTERVAL
+          value: "30"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 150Mi
+        volumeMounts:
+        - name: scripts-volume
+          mountPath: /app/scripts
+        - name: contracts-volume
+          mountPath: /contracts
+      volumes:
+      - name: scripts-volume
+        configMap:
+          name: hdfs-sink-script
+          defaultMode: 0755
+          optional: true
+      - name: contracts-volume
+        configMap:
+          name: contracts-schemas
+          optional: true

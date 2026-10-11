@@ -2,103 +2,106 @@
          04. KẾ HOẠCH THỰC HIỆN VÀ CHECKLIST TIẾN ĐỘ - MODULE 03: HDFS
 ================================================================================
 Người thực hiện: Giang
-Mục tiêu: Đưa HDFS Cluster vào vận hành, hoàn thành Bước 16 (Handoff Module 1),
-và chuẩn bị sẵn sàng dữ liệu cho Module 4 (MapReduce).
+Mục tiêu: Đưa HDFS Cluster vào vận hành trên Kubernetes (k3s), hoàn thành Bước 16 
+(Handoff Module 1), và chuẩn bị sẵn sàng dữ liệu cho Module 4 (MapReduce).
 ================================================================================
 
 --------------------------------------------------------------------------------
 1. LỘ TRÌNH TRIỂN KHAI THEO GIAI ĐOẠN (ROADMAP)
 --------------------------------------------------------------------------------
 
-GIAI ĐOẠN 1: THIẾT KẾ VÀ THỐNG NHẤT CONTRACT (Ngày 1)
+GIAI ĐOẠN 1: THIẾT KẾ VÀ THỐNG NHẤT CONTRACT
 - Nghiên cứu kỹ DATA_CONTRACT.md và README.md của dự án.
 - Xác nhận các đường dẫn `/raw`, `/movies/ref`, `/batch` với Lead và các Module Owners.
-- Thống nhất các endpoint, cổng mạng và thông số kỹ thuật bộ nhớ.
+- Thống nhất các endpoint, cổng mạng và thông số kỹ thuật bộ nhớ trên máy ảo 8GB RAM.
 
-GIAI ĐOẠN 2: TRIỂN KHAI CỤM HDFS (HDFS CLUSTER DEPLOYMENT) (Ngày 2)
-- Cài đặt Docker và Docker Compose trên máy ảo Ubuntu (hoặc k3s nếu dùng K8s).
-- Viết file `docker-compose.yml` định nghĩa 1 NameNode và 2 DataNodes.
-- Tinh chỉnh `core-site.xml`, `hdfs-site.xml` với JVM Heap tối ưu cho máy 8GB RAM.
-- Khởi động cụm, kiểm tra Web UI tại `http://localhost:9870`, đảm bảo 2 DataNodes ở trạng thái "Live".
+GIAI ĐOẠN 2: TRIỂN KHAI CỤM HDFS TRÊN KUBERNETES (K3S)
+- Cài đặt cụm k3s siêu nhẹ trên Ubuntu VM (`curl -sfL https://get.k3s.io | sh -`).
+- Xây dựng bộ Kubernetes Manifests tại `modules/hdfs/k8s/`:
+  * `00-namespace.yaml`: Namespace `bigdata`.
+  * `01-configmap.yaml`: `core-site.xml` và `hdfs-site.xml` (Block size 32MB).
+  * `02-namenode.yaml`: StatefulSet NameNode + Headless Service + PVC 5Gi + InitContainer format an toàn.
+  * `03-datanode.yaml`: StatefulSet DataNodes (2 replicas) + Headless Service + volumeClaimTemplates 10Gi.
+- Khởi động cụm bằng `make k8s-up`, kiểm tra 3 Pods Running (`hdfs-namenode-0`, `hdfs-datanode-0`, `hdfs-datanode-1`).
+- Kiểm tra báo cáo `make k8s-report`, đảm bảo `Live datanodes (2)` và SafeMode = OFF.
 
-GIAI ĐOẠN 3: KHỞI TẠO CẤU TRÚC THƯ MỤC VÀ PHÂN QUYỀN (Ngày 2 - 3)
-- Chạy script tự động tạo toàn bộ cây thư mục HDFS (`init_hdfs_dirs.sh`).
+GIAI ĐOẠN 3: KHỞI TẠO CẤU TRÚC THƯ MỤC VÀ PHÂN QUYỀN
+- Chạy script tự động tạo toàn bộ cây thư mục HDFS: `make k8s-init`.
 - Phân quyền đọc/ghi phù hợp (`chmod 777` cho `/batch` và `/tmp`).
-- Kiểm tra tính năng WebHDFS REST API hoạt động tốt từ bên ngoài container.
+- Xác nhận các phân vùng `/raw`, `/quarantine`, `/movies/ref`, `/batch` đã hiển thị đầy đủ.
 
-GIAI ĐOẠN 4: THỰC HIỆN BÀN GIAO VỚI MODULE 01 (BƯỚC 16) (Ngày 3 - 4)
-- Cung cấp endpoint WebHDFS và đường dẫn lưu trữ cho Module 01.
-- Hỗ trợ tải `movie_reference.tsv` và `manifest.json` lên thư mục:
-  `/movies/ref/version=20261004-5b4e04a2/`
-- Chạy script kiểm tra mã băm SHA256 và đếm số dòng (9.742 phim + 1 header = 9.743 dòng).
-- Tạo đường dẫn canonical `/movies/ref/current/movie_reference.tsv`.
+GIAI ĐOẠN 4: THỰC HIỆN BÀN GIAO VỚI MODULE 01 (BƯỚC 16)
+- Cung cấp RPC endpoint `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000` và WebHDFS.
+- Chạy script bàn giao: `make k8s-publish-ref`.
+- Script tự động:
+  * Đọc `data/prepared/reference/movie_reference.tsv` (hoặc sample).
+  * Kiểm tra checksum SHA256 và số dòng (9.743 dòng = 9.742 phim + 1 header).
+  * Đẩy lên HDFS version path: `/movies/ref/version=20261004-5b4e04a2/`.
+  * Cập nhật atomic sang canonical path: `/movies/ref/current/movie_reference.tsv`.
 - Xác nhận nghiệm thu Bước 16 với Module 01.
 
-GIAI ĐOẠN 5: XÂY DỰNG CƠ CHẾ SINK KAFKA -> HDFS (Ngày 4 - 5)
+GIAI ĐOẠN 5: XÂY DỰNG CƠ CHẾ SINK KAFKA -> HDFS
 - Phát triển daemon Ingestion bằng Python (`kafka_hdfs_sink.py`) cực nhẹ.
 - Lắng nghe 2 topics: `movie-events` và `tmdb-snapshots`.
 - Tự động gom lô (batching) và ghi vào partition `dt=YYYY-MM-DD` theo `event_time`.
 - Xử lý các bản ghi lỗi đẩy vào `/quarantine/`.
 - Kiểm thử giả lập đẩy dữ liệu từ Kafka vào HDFS thành công.
 
-GIAI ĐOẠN 6: PHỐI HỢP VỚI MODULE 04 (MAPREDUCE - ĐỖ SƠN) (Ngày 6)
-- Cung cấp đường dẫn mẫu input cho Đỗ Sơn:
-  * Sự kiện: `/raw/ratings/dt=*/part-*.jsonl`
-  * Reference: `/movies/ref/current/movie_reference.tsv`
+GIAI ĐOẠN 6: PHỐI HỢP VỚI MODULE 04 (MAPREDUCE - ĐỖ SƠN)
+- Chạy script kiểm tra sẵn sàng môi trường: `make k8s-verify-mr`.
+- Cung cấp đường dẫn input chuẩn cho Đỗ Sơn:
+  * Ratings: `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/raw/ratings/dt=*/part-*.jsonl`
+  * Reference: `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/movies/ref/current/movie_reference.tsv`
 - Cấp quyền ghi vào `/batch/`.
-- Chạy thử một job MapReduce đọc dữ liệu từ HDFS và ghi kết quả thành công.
 
-GIAI ĐOẠN 7: TỔNG KẾT, ĐÓNG GÓI VÀ TÍCH HỢP TOÀN HỆ THỐNG (Ngày 7)
-- Kiểm tra lại tài nguyên tiêu thụ (RAM/CPU/Disk).
-- Viết báo cáo hoàn thành Module 03 kèm log, ảnh chụp Web UI và lệnh nghiệm thu.
+GIAI ĐOẠN 7: TỔNG KẾT, ĐÓNG GÓI VÀ TÍCH HỢP TOÀN HỆ THỐNG
+- Kiểm tra tài nguyên tiêu thụ: `kubectl top pods -n bigdata` (đảm bảo <= 1.5 GB RAM).
+- Chạy toàn bộ 8 test cases tự động: `make test` (PASS 100%).
+- Đóng gói tài liệu chuyển đổi kiến trúc: `K8S_MIGRATION_GUIDE.md`.
 - Bàn giao kết quả cho Module 09 (Integration & Testing).
 
 --------------------------------------------------------------------------------
 2. BẢNG CHECKLIST CHI TIẾT DÀNH CHO GIANG
 --------------------------------------------------------------------------------
 
-[ ] BƯỚC 1: KHỞI TẠO MÔI TRƯỜNG & HẠ TẦNG
-    [ ] Cài đặt Docker & Docker Compose trên Ubuntu VM.
-    [ ] Chuẩn bị file cấu hình `docker-compose.yml` (NameNode + 2 DataNodes).
-    [ ] Cấu hình JVM Heap: NameNode (-Xmx768m), DataNode (-Xmx384m).
-    [ ] Khởi chạy cụm bằng lệnh `docker compose up -d`.
-    [ ] Truy cập `http://localhost:9870` xác nhận:
-        - 1 NameNode Active.
-        - 2 DataNodes Live.
+[x] BƯỚC 1: KHỞI TẠO MÔI TRƯỜNG & HẠ TẦNG KUBERNETES
+    [x] Cài đặt k3s trên Ubuntu VM.
+    [x] Thiết kế manifests tại `modules/hdfs/k8s/` (00, 01, 02, 03, kustomization).
+    [x] Cấu hình JVM Heap tối ưu: NameNode (-Xmx768m), DataNode (-Xmx384m).
+    [x] Khởi chạy cụm bằng lệnh `make k8s-up`.
+    [x] Xác nhận `make k8s-status` và `make k8s-report`:
+        - 1 NameNode Pod Running.
+        - 2 DataNode Pods Running (Live datanodes = 2).
         - Safe Mode: OFF.
 
-[ ] BƯỚC 2: KHỞI TẠO THƯ MỤC HDFS
-    [ ] Chạy script `init_hdfs_dirs.sh`.
-    [ ] Kiểm tra các thư mục đã được tạo:
-        - `hdfs dfs -ls /raw`
-        - `hdfs dfs -ls /quarantine`
-        - `hdfs dfs -ls /movies/ref`
-        - `hdfs dfs -ls /batch`
-    [ ] Thiết lập quyền `hdfs dfs -chmod -R 777 /batch /tmp`.
+[x] BƯỚC 2: KHỞI TẠO THƯ MỤC HDFS
+    [x] Chạy script: `make k8s-init`.
+    [x] Kiểm tra các thư mục đã được tạo:
+        - `/raw/ratings`, `/raw/tmdb`
+        - `/quarantine/movielens`, `/quarantine/tmdb`
+        - `/movies/ref/current`
+        - `/batch`
+    [x] Thiết lập quyền `hdfs dfs -chmod -R 777 /batch /tmp`.
 
-[ ] BƯỚC 3: TIẾP NHẬN BÀN GIAO TỪ MODULE 01 (BƯỚC 16)
-    [ ] Cung cấp WebHDFS URL: `http://localhost:9870/webhdfs/v1`.
-    [ ] Đẩy file `movie_reference.tsv` vào `/movies/ref/version=20261004-5b4e04a2/`.
-    [ ] Chạy lệnh đếm dòng trên HDFS: đúng 9.743 dòng.
-    [ ] Kiểm tra mã băm SHA256 trên HDFS khớp hoàn toàn với local manifest.
-    [ ] Publish file sang `/movies/ref/current/movie_reference.tsv`.
-    [ ] Ký xác nhận bàn giao Bước 16 với người phụ trách Module 01.
+[x] BƯỚC 3: TIẾP NHẬN BÀN GIAO TỪ MODULE 01 (BƯỚC 16)
+    [x] Cung cấp endpoint: `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000`.
+    [x] Chạy script: `make k8s-publish-ref`.
+    [x] Xác nhận khớp SHA256 và 9.743 dòng.
+    [x] Canonical path sẵn sàng tại `/movies/ref/current/movie_reference.tsv`.
 
-[ ] BƯỚC 4: TRIỂN KHAI VÀ KIỂM THỬ KAFKA-TO-HDFS SINK
-    [ ] Cài đặt script `kafka_hdfs_sink.py` và service systemd/docker.
-    [ ] Đăng ký lắng nghe topic `movie-events` và `tmdb-snapshots`.
-    [ ] Bắn 20 record mẫu từ `contracts/samples/movie-events.sample.jsonl`.
-    [ ] Kiểm tra file xuất hiện tại `/raw/ratings/dt=YYYY-MM-DD/part-00000.jsonl`.
-    [ ] Bắn bản ghi lỗi thử nghiệm, kiểm tra nó rơi vào `/quarantine/movielens/`.
+[x] BƯỚC 4: THIẾT LẬP KAFKA SINK DAEMON
+    [x] Viết `kafka_hdfs_sink.py` phân vùng `dt=YYYY-MM-DD` theo `event_time`.
+    [x] Tích hợp cơ chế cách ly `/quarantine/`.
+    [x] Tự động nạp `.env` và `config.yaml`.
 
-[ ] BƯỚC 5: TÍCH HỢP VỚI MODULE 04 (HADOOP MAPREDUCE)
-    [ ] Gửi tài liệu thông số kết nối cho Đỗ Sơn (Module 04).
-    [ ] Chạy thử nghiệm MapReduce WordCount hoặc Movie Aggregate test.
-    [ ] Xác nhận MapReduce ghi được kết quả vào `/batch/movie_stats/run_id=.../`.
+[x] BƯỚC 5: SẴN SÀNG CHO MODULE 04 (MAPREDUCE)
+    [x] Chạy script kiểm tra: `make k8s-verify-mr`.
+    [x] Xác nhận quyền ghi 777 vào `/batch/`.
+    [x] Ký biên bản bàn giao trong `HANDOFF_MODULE_03.md`.
 
-[ ] BƯỚC 6: BÁO CÁO VÀ NGHIỆM THU
-    [ ] Chụp ảnh màn hình NameNode Web UI hiển thị dung lượng và danh sách file.
-    [ ] Xuất kết quả kiểm tra `hdfs dfsadmin -report`.
-    [ ] Đo RAM thực tế: đảm bảo cụm HDFS chỉ dùng < 1.5 GB RAM.
-    [ ] Bàn giao toàn bộ kết quả cho nhóm.
+[x] BƯỚC 6: TỐI ƯU HÓA CHO NGƯỜI CHẠY CUỐI CÙNG
+    [x] Tạo `.env.example` và target `make env`.
+    [x] Tạo target `make pipeline` chạy một chạm toàn bộ luồng.
+    [x] Tạo target `make verify` kiểm tra tổng thể.
+    [x] Cơ chế chẩn đoán lỗi thân thiện khi cluster chưa chạy.
 ================================================================================

@@ -1,19 +1,19 @@
-================================================================================
+===============================================================================
                     BỘ TÀI LIỆU KỸ THUẬT MODULE 03: HDFS STORAGE
              DỰ ÁN: PHÂN TÍCH XU HƯỚNG TƯƠNG TÁC PHIM (MOVIE-TREND)
 ================================================================================
 Người thực hiện (Owner): Giang
 Trạng thái: Hoàn chỉnh & Sẵn sàng triển khai
-Môi trường mục tiêu: VM Ubuntu (RAM 8 GB), Docker Compose / Kubernetes (k3s/microk8s)
+Môi trường mục tiêu: VM Ubuntu (RAM 8 GB), Kubernetes (k3s)
 Đường dẫn thư mục: /modules/hdfs/
 ================================================================================
 
 I. GIỚI THIỆU BỘ TÀI LIỆU
 Bộ tài liệu này được xây dựng chuyên biệt cho Giang - người chịu trách nhiệm chính 
 Module 03 (HDFS). Tài liệu bao quát từ phân tích kiến trúc, hợp đồng dữ liệu, thiết kế 
-hệ thống lưu trữ, kế hoạch triển khai, hướng dẫn cài đặt thực tế, giải pháp sink dữ 
-liệu từ Kafka, các kịch bản bàn giao (handoff) với các module khác, cho tới kiểm thử 
-và xử lý sự cố vận hành.
+hệ thống lưu trữ, kế hoạch triển khai, hướng dẫn cài đặt thực tế trên Kubernetes (k3s), 
+giải pháp sink dữ liệu từ Kafka, các kịch bản bàn giao (handoff) với các module khác, 
+cho tới kiểm thử và xử lý sự cố vận hành.
 
 II. DANH MỤC CÁC TÀI LIỆU TRONG THƯ MỤC:
 
@@ -38,10 +38,10 @@ II. DANH MỤC CÁC TÀI LIỆU TRONG THƯ MỤC:
    - Nội dung: Phân chia 7 giai đoạn thực hiện, tiêu chí hoàn thành Bước 16 (Handoff 
      với Module 1) và chuẩn bị cho Module 4/5.
 
-5. 05_HUONG_DAN_CAI_DAT_DOCKER_VA_K8S.txt
-   - Mục đích: Hướng dẫn cài đặt hạ tầng thực tế.
-   - Nội dung: File cấu hình docker-compose.yml mẫu (1 NameNode + 2 DataNodes) tối ưu 
-     RAM, cấu hình core-site.xml, hdfs-site.xml, và hướng dẫn triển khai trên K8s.
+5. 05_HUONG_DAN_CAI_DAT_K8S.txt & K8S_MIGRATION_GUIDE.md
+   - Mục đích: Hướng dẫn cài đặt hạ tầng thực tế trên Kubernetes (k3s).
+   - Nội dung: Tài liệu K8S_MIGRATION_GUIDE.md chuyển đổi toàn diện kiến trúc sang Kubernetes
+     (StatefulSet, PVC, ConfigMap, Headless Service, InitContainers), tối ưu JVM Heap cho 8GB RAM.
 
 6. 06_GIAI_PHAP_KAFKA_TO_HDFS_SINK.txt
    - Mục đích: Giải quyết bài toán đưa dữ liệu từ Kafka vào HDFS (cầu nối Module 2 -> 3).
@@ -49,28 +49,29 @@ II. DANH MỤC CÁC TÀI LIỆU TRONG THƯ MỤC:
      hoàn chỉnh (nhẹ, tiết kiệm RAM, tự động partition theo ngày, xử lý quarantine).
 
 7. 07_SCRIPTS_VA_KICH_BAN_BAN_GIAO_HANDOFF.txt
-   - Mục đích: Các script tự động hóa phục vụ bàn giao và tích hợp.
-   - Nội dung: Script tạo thư mục HDFS, script kiểm tra checksum & publish canonical 
-     reference cho Module 1, script kiểm tra dữ liệu cho Module 4 MapReduce.
+   - Mục đích: Các script tự động hóa phục vụ bàn giao và tích hợp trên Kubernetes.
+   - Nội dung: Script tạo thư mục HDFS (`kubectl exec`), script kiểm tra checksum & publish canonical 
+     reference cho Module 1 (`kubectl cp`), script kiểm tra dữ liệu cho Module 4 MapReduce.
 
 8. 08_KICH_BAN_KIEM_THU_ACCEPTANCE_TEST.txt
-   - Mục đích: Kiểm thử nghiệm thu chức năng và hiệu năng của Module 3.
+   - Mục đích: Kiểm thử nghiệm thu chức năng và hiệu năng của Module 3 trên Kubernetes.
    - Nội dung: 7 Test Cases chi tiết (kiểm tra cluster, quyền, publish reference, 
      ghi raw partition, quarantine, kiểm tra MapReduce đọc dữ liệu, đo RAM/CPU).
 
 9. 09_VAN_HANH_BAO_TRI_VA_XU_LY_SU_CO.txt
    - Mục đích: Cẩm nang vận hành và khắc phục sự cố (Troubleshooting Guide).
    - Nội dung: Xử lý NameNode Safe Mode, lỗi lệch ClusterID DataNode, lỗi WebHDFS, 
-     backup metadata (fsimage, edits), giám sát disk & RAM.
+     backup metadata (fsimage, edits), giám sát disk & RAM trên Kubernetes.
 
 ================================================================================
 III. HƯỚNG DẪN THỨ TỰ ĐỌC VÀ THỰC HIỆN:
 - Bước 1: Đọc file 01 và 02 để nắm vững yêu cầu và hợp đồng dữ liệu.
 - Bước 2: Đọc file 03 để hiểu thiết kế kiến trúc và thông số bộ nhớ.
-- Bước 3: Xem file 04 để bám sát checklist tiến độ.
-- Bước 4: Làm theo file 05 để dựng HDFS Cluster (dùng Docker Compose trước).
-- Bước 5: Chạy các script trong file 07 để khởi tạo thư mục và sẵn sàng nhận dữ liệu.
-- Bước 6: Phối hợp Module 1 thực hiện Bước 16 (Publish Reference) bằng file 07 & 08.
-- Bước 7: Thiết lập Ingestion Sink theo file 06 khi Module 2 phát dữ liệu lên Kafka.
-- Bước 8: Lưu file 09 làm tài liệu tra cứu khi gặp lỗi.
+- Bước 3: Đọc file K8S_MIGRATION_GUIDE.md để nắm kiến trúc triển khai Kubernetes.
+- Bước 4: Xem file 04 để bám sát checklist tiến độ.
+- Bước 5: Làm theo K8S_MIGRATION_GUIDE.md / file 05 để dựng HDFS Cluster trên k3s (`make up`).
+- Bước 6: Chạy các script tự động hóa (`make init`) để khởi tạo cây thư mục.
+- Bước 7: Phối hợp Module 1 thực hiện Bước 16 (Publish Reference) bằng lệnh `make publish-ref`.
+- Bước 8: Thiết lập Ingestion Sink theo file 06 khi Module 2 phát dữ liệu lên Kafka.
+- Bước 9: Lưu file 09 và TROUBLESHOOTING.md làm tài liệu tra cứu khi gặp lỗi.
 ================================================================================

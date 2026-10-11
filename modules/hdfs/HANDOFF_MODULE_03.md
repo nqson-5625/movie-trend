@@ -19,9 +19,13 @@ Tài liệu này xác lập quy chuẩn bàn giao (Handoff) và tiêu chí nghi�
 ## 2. Chi tiết bàn giao từng giao tiếp
 
 ### 2.1. Handoff với Module 01 (Data Source & Preparation) — Bước 16
-- **Vấn đề đã giải quyết:** Trong [modules/data_source/README.md](../data_source/README.md) nêu rõ: *"Bước 16: Chờ HDFS endpoint/path để publish reference"*. Module 03 đã cung cấp trọn vẹn giải pháp này.
+- **Vấn đề đã giải quyết:** Trong [modules/data_source/README.md](../data_source/README.md) nêu rõ: *"Bước 16: Chờ HDFS endpoint/path để publish reference"*. Module 03 đã cung cấp trọn vẹn giải pháp này trên Kubernetes.
+- **Endpoint cung cấp:**
+  * **RPC NameNode:** `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000`
+  * **WebHDFS REST API:** `http://hdfs-namenode-svc.bigdata.svc.cluster.local:9870/webhdfs/v1`
+  * **Host Port-Forward:** `http://localhost:9870`
 - **Quy trình nghiệm thu 4 bước:**
-  1. Module 03 mở port WebHDFS `http://localhost:9870/webhdfs/v1` và RPC `hdfs://localhost:9000`.
+  1. Module 03 khởi động cụm HDFS Kubernetes (`make up`) và kiểm tra NameNode sẵn sàng.
   2. File `data/prepared/reference/movie_reference.tsv` được tải lên `/movies/ref/version=<ref_version>/movie_reference.tsv`.
   3. Kiểm tra tính toàn vẹn:
      - Số dòng phải là: **9.743 dòng** (9.742 phim + 1 header).
@@ -29,7 +33,7 @@ Tài liệu này xác lập quy chuẩn bàn giao (Handoff) và tiêu chí nghi�
   4. Cập nhật atomic sang canonical path: `/movies/ref/current/movie_reference.tsv`.
 - **Lệnh thực hiện:**
   ```bash
-  python modules/hdfs/scripts/publish_reference.py
+  make -C modules/hdfs publish-ref
   ```
 
 ---
@@ -44,15 +48,17 @@ Tài liệu này xác lập quy chuẩn bàn giao (Handoff) và tiêu chí nghi�
   - Xử lý bản ghi hỏng (Bad records / Schema violation): Đẩy vào `/quarantine/<source>/dt=YYYY-MM-DD/error-*.jsonl` kèm trường `error_reason`.
 - **Lệnh thực hiện daemon:**
   ```bash
-  python modules/hdfs/scripts/kafka_hdfs_sink.py
+  make -C modules/hdfs sink
+  # Kiểm thử tự động luồng tích hợp Kafka-HDFS:
+  make -C modules/hdfs test-sink
   ```
 
 ---
 
 ### 2.3. Handoff với Module 04 (Hadoop MapReduce - Đỗ Sơn)
 - **Dữ liệu đầu vào (Input):**
-  - Ratings: `hdfs://namenode:9000/raw/ratings/dt=*/part-*.jsonl`
-  - Canonical Reference: `hdfs://namenode:9000/movies/ref/current/movie_reference.tsv`
+  - Ratings: `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/raw/ratings/dt=*/part-*.jsonl`
+  - Canonical Reference: `hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/movies/ref/current/movie_reference.tsv`
 - **Dữ liệu đầu ra (Output):**
   - Thư mục `/batch/` đã được mở quyền `chmod 777`.
   - Cấu trúc thư mục con cho từng batch job:
@@ -62,7 +68,7 @@ Tài liệu này xác lập quy chuẩn bàn giao (Handoff) và tiêu chí nghi�
     * `/batch/_meta/run_id=<run_id>/manifest.json`
 - **Lệnh kiểm tra:**
   ```bash
-  bash modules/hdfs/scripts/verify_mapreduce_handoff.sh
+  make -C modules/hdfs verify-mr
   ```
 
 ---
