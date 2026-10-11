@@ -5,7 +5,7 @@ COMPOSE_FILE = docker/docker-compose.yml
 CONTAINER_NAMENODE = hdfs-namenode
 PYTHON ?= python3
 
-.PHONY: help up down restart ps report init publish-ref verify-mr run-sink stats clean
+.PHONY: help up down restart ps report init test publish-ref verify-mr run-sink stats clean
 
 help:
 	@echo "Các lệnh điều khiển Module 03 HDFS:"
@@ -15,6 +15,7 @@ help:
 	@echo "  make ps          - Xem trạng thái containers HDFS"
 	@echo "  make report      - Kiểm tra báo cáo dfsadmin -report"
 	@echo "  make init        - Khởi tạo cây thư mục chuẩn trên HDFS"
+	@echo "  make test        - Chạy kiểm thử tự động luồng Module 01 -> Module 03"
 	@echo "  make publish-ref - Nghiệm thu bàn giao Bước 16 (Publish canonical reference)"
 	@echo "  make verify-mr   - Kiểm tra môi trường cho Module 04 (MapReduce)"
 	@echo "  make run-sink    - Chạy Ingestion Daemon kéo dữ liệu Kafka -> HDFS"
@@ -41,6 +42,9 @@ report:
 
 init:
 	bash scripts/init_hdfs_dirs.sh $(CONTAINER_NAMENODE)
+
+test:
+	$(PYTHON) tests/test_flow_module_1_to_3.py
 
 publish-ref:
 	$(PYTHON) scripts/publish_reference.py
