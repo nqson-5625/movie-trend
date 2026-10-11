@@ -1,0 +1,102 @@
+================================================================================
+     09. CẨM NANG VẬN HÀNH, BẢO TRÌ VÀ XỬ LÝ SỰ CỐ - MODULE 03: HDFS
+================================================================================
+Người thực hiện: Giang
+Mục tiêu: Xử lý nhanh các sự cố thường gặp của Hadoop HDFS trong quá trình làm đồ án
+================================================================================
+
+--------------------------------------------------------------------------------
+1. CÁC LỆNH GIÁM SÁT SỨC KHỎE HDFS HÀNG NGÀY
+--------------------------------------------------------------------------------
+
+1. Kiểm tra trạng thái tổng thể của cụm:
+   docker exec -it hdfs-namenode hdfs dfsadmin -report
+
+2. Kiểm tra tính toàn vẹn của các blocks trên HDFS (quét lỗi hỏng block):
+   docker exec -it hdfs-namenode hdfs fsck / -files -blocks -locations
+
+3. Xem dung lượng thực tế đang lưu trữ trên HDFS:
+   docker exec -it hdfs-namenode hdfs dfs -df -h /
+   docker exec -it hdfs-namenode hdfs dfs -du -h -s /raw /movies /batch
+
+4. Theo dõi log thời gian thực của NameNode:
+   docker logs -f --tail 100 hdfs-namenode
+
+5. Theo dõi log của DataNode:
+   docker logs -f --tail 100 hdfs-datanode1
+
+--------------------------------------------------------------------------------
+2. XỬ LÝ CÁC SỰ CỐ ĐIỂN HÌNH (TROUBLESHOOTING)
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+SỰ CỐ 1: NAMENODE BỊ KẸT Ở CHẾ ĐỘ SAFE MODE
+- Hiện tượng: Khi chạy lệnh `hdfs dfs -put` hoặc ghi dữ liệu, nhận được thông báo lỗi:
+  "Cannot create file... Name node is in safe mode."
+- Nguyên nhân: Khi mới khởi động, NameNode cần thời gian chờ các DataNode gửi danh sách 
+  block report. Nếu chưa đạt ngưỡng 99.9% block an toàn, NameNode tự khóa ghi.
+- Cách xử lý:
+  Bước 1: Kiểm tra trạng thái:
+    docker exec -it hdfs-namenode hdfs dfsadmin -safemode get
+  Bước 2: Nếu các DataNode đã kết nối đủ mà NameNode vẫn chưa thoát, cưỡng chế thoát:
+    docker exec -it hdfs-namenode hdfs dfsadmin -safemode leave
+
+--------------------------------------------------------------------------------
+SỰ CỐ 2: DATANODE KHÔNG KHỞI ĐỘNG ĐƯỢC DO "CLUSTERID MISMATCH"
+- Hiện tượng: Container `hdfs-datanode1` liên tục restart hoặc crash. Xem log thấy dòng:
+  "java.io.IOException: Incompatible clusterIDs in /opt/hadoop/data/dataNode: 
+   namenode clusterID = CID-xxx; datanode clusterID = CID-yyy"
+- Nguyên nhân: Xảy ra khi Giang format lại NameNode (`hdfs namenode -format`) khiến 
+  NameNode sinh ra ClusterID mới, trong khi DataNode vẫn giữ dữ liệu và ClusterID cũ.
+- Cách xử lý triệt để:
+  Bước 1: Dừng cụm:
+    docker compose down
+  Bước 2: Xóa volume dữ liệu cũ:
+    docker volume rm hdfs_datanode1_data hdfs_datanode2_data
+  Bước 3: Khởi động lại:
+    docker compose up -d
+
+--------------------------------------------------------------------------------
+SỰ CỐ 3: TIẾN TRÌNH JAVA BỊ CRASH DO THIẾU BỘ NHỚ RAM (OOM KILLER)
+- Hiện tượng: Container tự động tắt mà không có log lỗi Java; hoặc kiểm tra `dmesg` 
+  trên Ubuntu thấy dòng chữ:
+  "Out of memory: Killed process java (hdfs-namenode)"
+- Nguyên nhân: Máy ảo 8GB RAM bị quá tải khi chạy đồng thời Kafka, Spark, ES và Hadoop. 
+  Hệ điều hành Linux tự động kích hoạt OOM Killer để tiêu diệt các tiến trình tốn RAM.
+- Cách xử lý:
+  1. Đảm bảo đã đặt giới hạn Heap trong `docker-compose.yml`:
+     - NameNode: `-Xms512m -Xmx768m`
+     - DataNode: `-Xms256m -Xmx384m`
+  2. Bật Swap Memory trên Ubuntu VM để chống tràn RAM đột ngột:
+     Chạy các lệnh sau trên máy ảo Ubuntu:
+     sudo fallocate -l 4G /swapfile
+     sudo chmod 600 /swapfile
+     sudo mkswap /swapfile
+     sudo swapon /swapfile
+     # Kiểm tra lại:
+     free -h
+
+--------------------------------------------------------------------------------
+SỰ CỐ 4: LỖI KẾT NỐI WEBHDFS TỪ NGOÀI CONTAINER (HTTP 307 REDIRECT)
+- Hiện tượng: Gọi API WebHDFS để upload file thì bước đầu thành công (nhận HTTP 307), 
+  nhưng bước chuyển hướng tới DataNode thì bị lỗi "Connection refused" hoặc "Could not resolve host".
+- Nguyên nhân: Giao thức WebHDFS hoạt động theo cơ chế 2 bước:
+  1. Client gửi request tới NameNode.
+  2. NameNode trả về mã 307 chuyển hướng tới DataNode kèm hostname của DataNode (ví dụ `datanode1:9864`). 
+     Nếu máy host của bạn không phân giải được tên miền `datanode1`, kết nối sẽ gãy.
+- Cách xử lý:
+  Thêm các dòng sau vào file `/etc/hosts` trên máy chủ Ubuntu (hoặc `C:\Windows\System32\drivers\etc\hosts` trên Windows):
+  127.0.0.1 namenode datanode1 datanode2
+
+--------------------------------------------------------------------------------
+SỰ CỐ 5: SAO LƯU VÀ PHỤC HỒI METADATA NAMENODE
+- Nguyên tắc: Toàn bộ cấu trúc thư mục, thông tin file và phân vùng của HDFS nằm trong 
+  bộ nhớ của NameNode và được ghi xuống đĩa dưới dạng `fsimage` và `edits`.
+- Thao tác sao lưu an toàn:
+  1. Ép NameNode lưu trạng thái hiện tại xuống đĩa (Save Namespace):
+     docker exec -it hdfs-namenode hdfs dfsadmin -safemode enter
+     docker exec -it hdfs-namenode hdfs dfsadmin -saveNamespace
+     docker exec -it hdfs-namenode hdfs dfsadmin -safemode leave
+  2. Copy thư mục metadata ra ngoài máy chủ để sao lưu:
+     docker cp hdfs-namenode:/opt/hadoop/data/nameNode ./backup_namenode_metadata
+================================================================================

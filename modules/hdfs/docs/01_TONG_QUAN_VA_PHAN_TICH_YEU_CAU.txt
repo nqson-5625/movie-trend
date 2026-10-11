@@ -1,0 +1,84 @@
+================================================================================
+           01. TỔNG QUAN VÀ PHÂN TÍCH YÊU CẦU - MODULE 03: HDFS STORAGE
+================================================================================
+Người thực hiện: Giang
+Hệ thống: Phân tích xu hướng tương tác với phim (Movie-Trend Analytics)
+Kiến trúc tổng thể: Lambda Architecture
+================================================================================
+
+1. VỊ TRÍ CỦA MODULE 03 TRONG HỆ THỐNG
+Trong kiến trúc Lambda của dự án:
+- Tầng Tốc độ (Speed Layer): Kafka -> Spark Structured Streaming -> Elasticsearch.
+- Tầng Lô (Batch Layer): Kafka -> HDFS (Raw Data) -> Hadoop MapReduce -> Elasticsearch.
+- Dữ liệu Tham chiếu (Reference Data): Module 01 -> HDFS (/movies/ref) -> Cung cấp 
+  cho cả MapReduce (Batch) và Spark Streaming (Speed - static join).
+
+Module 03 (HDFS) chính là "Xương sống lưu trữ" (Storage Backbone) của toàn bộ 
+Batch Layer và Reference Pipeline. Nếu HDFS không hoạt động hoặc sai lệch cấu trúc 
+đường dẫn, Module 01 không thể bàn giao reference, Module 02 không có nơi lưu trữ 
+dữ liệu thô lâu dài, và Module 04 (MapReduce) sẽ không có dữ liệu đầu vào để tính toán.
+
+2. CÁC ĐẦU VÀO CỦA MODULE 03 (INPUTS)
+Module 03 tiếp nhận dữ liệu từ 2 nguồn chính:
+a) Từ Module 01 (Data Preparation):
+   - Canonical movie_reference.tsv (khoảng 9.742 phim chuẩn hóa).
+   - Mã băm ref_version (ví dụ: 20261004-5b4e04a2) và manifest.json kèm checksum SHA256.
+   - Thao tác: Module 01 tải trực tiếp hoặc gửi qua endpoint WebHDFS vào HDFS.
+
+b) Từ Module 02 (Kafka / Ingestion):
+   - Các dòng sự kiện ratings MovieLens từ topic `movie-events` (100.836 ratings).
+   - Các snapshot xu hướng từ topic `tmdb-snapshots` (mỗi snapshot gồm 20 phim).
+   - Thao tác: Dữ liệu từ Kafka được gom và ghi xuống HDFS theo từng file part-*.jsonl 
+     phân vùng theo ngày của event_time.
+
+3. TRÁCH NHIỆM CHÍNH CỦA GIANG (MODULE OWNER)
+Theo tài liệu README.md và DATA_CONTRACT.md, trách nhiệm cụ thể của Giang gồm:
+1. Xây dựng và duy trì cụm HDFS (HDFS Cluster) gồm:
+   - 01 NameNode quản lý metadata.
+   - 02 DataNodes lưu trữ dữ liệu thực tế (Blocks).
+2. Thiết kế và khởi tạo toàn bộ cấu trúc thư mục trên HDFS đúng chuẩn quy ước:
+   - Thư mục lưu sự kiện thô: `/raw/ratings/` và `/raw/tmdb/`.
+   - Thư mục cách ly dữ liệu lỗi: `/quarantine/`.
+   - Thư mục tham chiếu chuẩn: `/movies/ref/`.
+   - Thư mục đầu ra cho Batch: `/batch/`.
+3. Cung cấp các Endpoint kết nối cho toàn nhóm:
+   - RPC Endpoint: `hdfs://<namenode-host>:9000` (dành cho Hadoop MapReduce, Spark).
+   - WebHDFS REST API: `http://<namenode-host>:9870/webhdfs/v1` (dành cho Module 01 tải file, 
+     các script Python hoặc giám sát ngoài cụm).
+   - NameNode Web UI: `http://<namenode-host>:9870` (để kiểm tra trực quan, xem báo cáo dung lượng).
+4. Phối hợp với Module 01 để thực hiện Bước 16 (Publish Canonical Reference):
+   - Hướng dẫn và cung cấp quyền ghi vào `/movies/ref/version=<ref_version>/`.
+   - Hỗ trợ kiểm tra checksum SHA256 và số dòng trước khi cập nhật đường dẫn `/movies/ref/current/`.
+5. Triển khai hoặc phối hợp thiết lập cơ chế HDFS Sink để kéo dữ liệu từ Kafka vào HDFS 
+   đúng định dạng part-*.jsonl có phân vùng `dt=YYYY-MM-DD`.
+6. Cung cấp không gian và phân quyền cho Module 04 (Đỗ Sơn) đọc dữ liệu từ `/raw`, `/movies/ref` 
+   và ghi kết quả vào `/batch/`.
+
+4. RANH GIỚI TRÁCH NHIỆM (SCOPE BOUNDARY - NGUYÊN TẮC BẤT DI BẤT DỊCH)
+Để tránh xung đột công việc trong nhóm, Giang cần nắm chắc những điều mình ĐƯỢC LÀM 
+và KHÔNG ĐƯỢC LÀM:
+- ĐƯỢC LÀM (In-scope):
+  * Quản lý hạ tầng HDFS, phân vùng ổ đĩa, cấp phát quota, kiểm tra tính toàn vẹn dữ liệu.
+  * Tạo thư mục, phân quyền (chmod, chown), cấp endpoint cho các bên.
+  * Giám sát trạng thái cụm, xử lý sự cố SafeMode, thiếu DataNode, tràn RAM/ổ đĩa.
+  * Tạo cơ chế HDFS Sink trung gian nếu Module 02 chưa tự viết connector.
+- KHÔNG ĐƯỢC LÀM (Out-of-scope):
+  * KHÔNG tự ý chỉnh sửa nội dung bên trong file `movie_reference.tsv` (đây là quyền độc 
+    quyền của Module 01).
+  * KHÔNG tự tiện sửa đổi hay xóa bớt các dòng sự kiện trong thư mục `/raw/` (vùng Raw 
+    là Append-only và Bất biến - Immutable).
+  * KHÔNG can thiệp vào thuật toán tính toán của MapReduce (Module 04) hay Spark (Module 05).
+
+5. RÀNG BUỘC PHI CHỨC NĂNG (NON-FUNCTIONAL REQUIREMENTS)
+- Giới hạn phần cứng: Toàn bộ hệ thống (Kafka, Zookeeper/KRaft, HDFS, Spark, Elasticsearch, 
+  Dashboard) dự kiến chạy trên 01 máy ảo Ubuntu với 8 GB RAM.
+- Giới hạn RAM cho HDFS:
+  * NameNode và 2 DataNodes KHÔNG ĐƯỢC chiếm quá 1.5 GB - 2 GB RAM.
+  * Cần cấu hình JVM Heap tối ưu: NameNode cấp tối đa 1024 MB (1 GB), mỗi DataNode cấp 
+    tối đa 512 MB.
+- Tính toàn vẹn và độ tin cậy:
+  * Tỷ lệ sao lưu block (Replication Factor): Trong môi trường máy ảo nhỏ 8GB RAM, cấu 
+    hình `dfs.replication = 1` hoặc `2` để tiết kiệm ổ đĩa và RAM.
+  * Block size: Dữ liệu đồ án nhỏ (khoảng vài chục MB đến vài trăm MB), nên cấu hình 
+    `dfs.blocksize = 32m` hoặc `64m` (thay vì mặc định 128m) để xử lý chia block nhanh và nhẹ.
+================================================================================

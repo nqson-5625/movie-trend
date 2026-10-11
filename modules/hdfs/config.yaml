@@ -1,0 +1,26 @@
+hdfs:
+  namenode:
+    rpc_host: "localhost"
+    rpc_port: 9000
+    webhdfs_port: 9870
+    container_name: "hdfs-namenode"
+  replication: 2
+  block_size_bytes: 33554432 # 32 MB
+  paths:
+    raw_ratings: "/raw/ratings"
+    raw_tmdb: "/raw/tmdb"
+    quarantine: "/quarantine"
+    ref_current: "/movies/ref/current/movie_reference.tsv"
+    ref_version_prefix: "/movies/ref/version="
+    batch_root: "/batch"
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topics:
+    movie_events: "movie-events"
+    tmdb_snapshots: "tmdb-snapshots"
+  group_id: "hdfs-sink-group"
+
+sink:
+  batch_size: 500
+  flush_interval_sec: 30

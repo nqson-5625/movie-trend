@@ -1,0 +1,105 @@
+================================================================================
+          02. HỢP ĐỒNG DỮ LIỆU VÀ GIAO TIẾP HỆ THỐNG - MODULE 03: HDFS
+================================================================================
+Người thực hiện: Giang
+Căn cứ tài liệu: DATA_CONTRACT.md (phiên bản 1.0-draft)
+================================================================================
+
+Tài liệu này chi tiết hóa toàn bộ các đặc tả kỹ thuật, cấu trúc đường dẫn, định dạng 
+tệp tin và giao thức kết nối mà Giang (Module 03) phải cung cấp cho các module khác.
+
+--------------------------------------------------------------------------------
+1. CẤU TRÚC ĐƯỜNG DẪN HDFS CHUẨN (HDFS PATH SPECIFICATIONS)
+--------------------------------------------------------------------------------
+
+HDFS phải tuân thủ nghiêm ngặt quy ước đặt tên `snake_case` cho thư mục và phân vùng:
+
+A. VÙNG DỮ LIỆU THÔ (RAW ZONE) - APPEND-ONLY, IMMUTABLE
+1. MovieLens Ratings:
+   Đường dẫn: `/raw/ratings/dt=YYYY-MM-DD/part-*.jsonl`
+   - Định dạng: JSONL (mỗi dòng là một JSON object độc lập, UTF-8, không có mảng bọc ngoài).
+   - Phân vùng: `dt=YYYY-MM-DD` được tính toán dựa trên ngày của trường `event_time` (UTC).
+   - Schema tương ứng: `movie-events` (schema_version="1.0").
+   - Các trường bắt buộc:
+     {"schema_version":"1.0","event_id":"...","source":"movielens","userId":1,"movieId":1,"rating":4.0,"event_time":"...","ingest_time":"..."}
+
+2. TMDB Trending Snapshots:
+   Đường dẫn: `/raw/tmdb/dt=YYYY-MM-DD/part-*.jsonl`
+   - Định dạng: JSONL UTF-8.
+   - Phân vùng: `dt=YYYY-MM-DD` lấy theo ngày của `event_time` (thời điểm chụp snapshot).
+   - Schema tương ứng: `tmdb-snapshots` (schema_version="1.0").
+   - Mỗi file chứa 20 bản ghi phim trending.
+
+3. Vùng cách ly dữ liệu lỗi (Quarantine Zone):
+   Đường dẫn: `/quarantine/<source>/dt=YYYY-MM-DD/error-*.jsonl`
+   - Ví dụ: `/quarantine/movielens/dt=2026-10-11/` hoặc `/quarantine/tmdb/dt=2026-10-11/`
+   - Quy tắc: Tuyệt đối không xóa bỏ bản ghi lỗi khi sink dữ liệu. Mọi bản ghi sai schema, 
+     JSON hỏng hoặc thiếu trường bắt buộc phải được chuyển vào quarantine kèm theo 
+     trường bổ sung `error_reason` và `failed_at`.
+
+B. VÙNG DỮ LIỆU THAM CHIẾU (CANONICAL REFERENCE ZONE)
+1. Phiên bản lưu trữ lịch sử:
+   Đường dẫn: `/movies/ref/version=<ref_version>/movie_reference.tsv`
+   - Ví dụ: `/movies/ref/version=20261004-5b4e04a2/movie_reference.tsv`
+   - Kèm theo file manifest: `/movies/ref/version=<ref_version>/manifest.json`
+
+2. Đường dẫn chính thức cho downstream (Canonical Current):
+   Đường dẫn: `/movies/ref/current/movie_reference.tsv`
+   - Đây là đường dẫn DUY NHẤT mà Module 04 (MapReduce) và Module 05 (Spark) được phép 
+     đọc để thực hiện phép Join.
+   - Định dạng: TSV UTF-8 có header, gồm 10 cột theo đúng thứ tự:
+     movieId | title | release_year | genres | imdbId | tmdbId | imdb_rating | imdb_votes | ref_version | generated_at
+
+C. VÙNG TỔNG HỢP LÔ (BATCH ZONE) - CHO MODULE 04 MAPREDUCE
+Đường dẫn gốc: `/batch/`
+- Thư mục tổng hợp theo phim: `/batch/movie_stats/run_id=<run_id>/`
+- Thư mục tổng hợp theo ngày: `/batch/movie_daily_stats/run_id=<run_id>/`
+- Thư mục tổng hợp theo thể loại: `/batch/genre_daily_stats/run_id=<run_id>/`
+- Thư mục metadata chạy batch: `/batch/_meta/run_id=<run_id>/manifest.json`
+* Trong đó `<run_id>` có định dạng: `YYYYMMDDTHHMMSSZ` (ví dụ: `20261004T050000Z`).
+
+--------------------------------------------------------------------------------
+2. ĐẶC TẢ GIAO TIẾP VỚI CÁC MODULE LIÊN QUAN
+--------------------------------------------------------------------------------
+
+A. GIAO TIẾP VỚI MODULE 01 (DATA SOURCE & PREPARATION)
+- Mục đích: Thực hiện Bước 16 theo tài liệu Module 01 (Publish canonical reference).
+- Giao thức: WebHDFS REST API hoặc Hadoop CLI (`hdfs dfs -put`).
+- Quy trình chuẩn gồm 4 bước:
+  1. Giang cung cấp URL WebHDFS: `http://<namenode-host>:9870/webhdfs/v1` và quyền ghi 
+     vào `/movies/ref/`.
+  2. Module 01 đẩy file lên `/movies/ref/version=<ref_version>/movie_reference.tsv`.
+  3. Giang (hoặc script tự động) kiểm tra SHA256 checksum và số dòng (9.742 phim + 1 header = 9.743 dòng).
+  4. Nếu hợp lệ, tiến hành cập nhật atomic sang `/movies/ref/current/movie_reference.tsv`.
+
+B. GIAO TIẾP VỚI MODULE 02 (KAFKA / INGESTION)
+- Mục đích: Nhận dữ liệu stream từ topic `movie-events` và `tmdb-snapshots`.
+- Giao thức: HDFS Sink Connector hoặc Python Ingestion Consumer ghi trực tiếp qua RPC/WebHDFS.
+- Cam kết của Module 03:
+  * Phân chia đúng thư mục ngày theo trường `event_time`.
+  * Không làm mất message (At-least-once hoặc Exactly-once semantic).
+  * Giữ nguyên nội dung thô và tính bất biến của file.
+
+C. GIAO TIẾP VỚI MODULE 04 (HADOOP MAPREDUCE - ĐỖ SƠN)
+- Mục đích: Cung cấp nguồn dữ liệu đầu vào và nơi lưu trữ đầu ra cho các MapReduce Jobs.
+- Đầu vào MapReduce đọc từ HDFS:
+  * Sự kiện thô: `/raw/ratings/dt=*/part-*.jsonl`
+  * Reference để Distributed Cache/Join: `/movies/ref/current/movie_reference.tsv`
+- Đầu ra MapReduce ghi vào HDFS:
+  * Kết quả tính toán: `/batch/movie_stats/run_id=<run_id>/`
+  * Giang cần cấp quyền đọc và ghi đầy đủ (`chmod 777 /batch`) cho user thực thi Hadoop.
+
+--------------------------------------------------------------------------------
+3. THÔNG SỐ KẾT NỐI VÀ ENDPOINTS CÔNG BỐ TOÀN NHÓM
+--------------------------------------------------------------------------------
+
+Giang cần cấu hình và công bố các thông số sau trong mạng nội bộ (hoặc container network):
+
+- NameNode RPC Endpoint: `hdfs://namenode:9000` (hoặc `hdfs://localhost:9000`)
+- WebHDFS REST API: `http://namenode:9870/webhdfs/v1`
+- NameNode Web UI: `http://localhost:9870`
+- DataNode 1 Web UI: `http://localhost:9864`
+- DataNode 2 Web UI: `http://localhost:9865`
+- Cơ chế xác thực (Authentication): `simple` (user mặc định: `hdfs` hoặc `root`).
+- HDFS Block Replication: `1` (khi dev máy đơn) hoặc `2` (trên cụm).
+================================================================================

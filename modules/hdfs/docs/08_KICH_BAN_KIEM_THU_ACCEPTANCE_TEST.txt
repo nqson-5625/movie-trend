@@ -1,0 +1,113 @@
+================================================================================
+     08. KỊCH BẢN KIỂM THỬ VÀ TIÊU CHÍ NGHIỆM THU (TEST PLAN) - MODULE 03
+================================================================================
+Người thực hiện: Giang
+Mục tiêu: Đảm bảo Module 03 đạt 100% tiêu chí nghiệm thu trước khi tích hợp toàn hệ thống
+================================================================================
+
+--------------------------------------------------------------------------------
+1. MA TRẬN KỊCH BẢN KIỂM THỬ (TEST CASES MATRIX)
+--------------------------------------------------------------------------------
+
++-------+---------------------------------------+-----------------------------+----------+
+| Mã TC | Nội dung kiểm thử                     | Đối tượng phối hợp          | Mức độ   |
++-------+---------------------------------------+-----------------------------+----------+
+| TC-01 | Kiểm tra trạng thái Cluster & Web UI  | Nội bộ Module 03            | Nghiêm ngặt |
+| TC-02 | Kiểm tra cấu trúc thư mục & phân quyền| Nội bộ Module 03            | Nghiêm ngặt |
+| TC-03 | Kiểm thử tiếp nhận Reference (Bước 16)| Module 01 (Data Prep)       | Nghiêm ngặt |
+| TC-04 | Kiểm thử Sink Raw Ratings phân vùng   | Module 02 (Kafka)           | Nghiêm ngặt |
+| TC-05 | Kiểm thử cơ chế Quarantine lỗi        | Module 02 (Kafka)           | Quan trọng |
+| TC-06 | Kiểm thử đọc/ghi cho MapReduce        | Module 04 (MapReduce)       | Nghiêm ngặt |
+| TC-07 | Đo kiểm bộ nhớ RAM và tải CPU         | Module 09 (Integration)     | Nghiêm ngặt |
++-------+---------------------------------------+-----------------------------+----------+
+
+--------------------------------------------------------------------------------
+2. CHI TIẾT CÁC BƯỚC THỰC HIỆN VÀ KẾT QUẢ MONG ĐỢI
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+TC-01: KIỂM TRA TRẠNG THÁI CLUSTER & WEB UI
+- Mục đích: Đảm bảo NameNode và cả 2 DataNodes hoạt động bình thường, không bị kẹt SafeMode.
+- Lệnh thực thi:
+  docker exec -it hdfs-namenode hdfs dfsadmin -report
+  docker exec -it hdfs-namenode hdfs dfsadmin -safemode get
+- Kết quả mong đợi:
+  + "Live datanodes (2)"
+  + "Safe mode is OFF"
+  + Truy cập trình duyệt `http://localhost:9870` hiển thị giao diện Hadoop NameNode bình thường.
+
+--------------------------------------------------------------------------------
+TC-02: KIỂM TRA CẤU TRÚC THƯ MỤC & PHÂN QUYỀN
+- Mục đích: Đảm bảo toàn bộ các thư mục quy định trong DATA_CONTRACT.md đã sẵn sàng.
+- Lệnh thực thi:
+  docker exec -it hdfs-namenode hdfs dfs -ls /
+  docker exec -it hdfs-namenode hdfs dfs -ls /raw
+  docker exec -it hdfs-namenode hdfs dfs -ls /movies
+  docker exec -it hdfs-namenode hdfs dfs -ls /batch
+- Kết quả mong đợi:
+  + Tồn tại: `/raw/ratings`, `/raw/tmdb`, `/quarantine`, `/movies/ref`, `/batch`.
+  + Thư mục `/batch` và `/tmp` có quyền `rwxrwxrwx` (777).
+
+--------------------------------------------------------------------------------
+TC-03: KIỂM THỬ TIẾP NHẬN REFERENCE (BƯỚC 16 BÀN GIAO)
+- Mục đích: Nghiệm thu hoàn thành Bước 16 giữa Module 01 và Module 03.
+- Lệnh thực thi:
+  python modules/hdfs/scripts/publish_reference.py
+- Kết quả mong đợi:
+  + File `movie_reference.tsv` được tải lên đúng `/movies/ref/version=20261004-5b4e04a2/`.
+  + Lệnh `hdfs dfs -cat /movies/ref/current/movie_reference.tsv | wc -l` trả về: 9743 dòng 
+    (nếu dùng dataset thật) hoặc 21 dòng (nếu dùng sample).
+  + Khớp checksum SHA256 hoàn toàn với file nguồn local.
+
+--------------------------------------------------------------------------------
+TC-04: KIỂM THỬ SINK RAW RATINGS PHÂN VÙNG THEO NGÀY
+- Mục đích: Xác nhận dữ liệu thô từ Kafka được ghi đúng format JSONL và phân vùng ngày.
+- Lệnh thực thi (Bắn 1 record mẫu có event_time="2026-10-04T05:00:00Z"):
+  Lưu nội dung JSON vào container và put vào HDFS:
+  docker exec -it hdfs-namenode bash -c '
+    echo "{\"schema_version\":\"1.0\",\"event_id\":\"test01\",\"source\":\"movielens\",\"userId\":1,\"movieId\":1,\"rating\":4.0,\"event_time\":\"2026-10-04T05:00:00Z\",\"ingest_time\":\"2026-10-11T05:00:00Z\"}" > /tmp/sample.jsonl
+    hdfs dfs -mkdir -p /raw/ratings/dt=2026-10-04
+    hdfs dfs -put -f /tmp/sample.jsonl /raw/ratings/dt=2026-10-04/part-test.jsonl
+  '
+- Kiểm tra lại:
+  docker exec -it hdfs-namenode hdfs dfs -cat /raw/ratings/dt=2026-10-04/part-test.jsonl
+- Kết quả mong đợi:
+  + File nằm chính xác trong thư mục `dt=2026-10-04/`.
+  + Nội dung đọc ra là chuỗi JSON hợp lệ.
+
+--------------------------------------------------------------------------------
+TC-05: KIỂM THỬ CƠ CHẾ QUARANTINE
+- Mục đích: Bản ghi hỏng hoặc sai định dạng phải bị cô lập tại `/quarantine/`.
+- Lệnh thực thi:
+  docker exec -it hdfs-namenode bash -c '
+    echo "{\"bad_json\":\"broken\",\"error_reason\":\"Missing schema_version\"}" > /tmp/bad.jsonl
+    hdfs dfs -mkdir -p /quarantine/movielens/dt=2026-10-11
+    hdfs dfs -put -f /tmp/bad.jsonl /quarantine/movielens/dt=2026-10-11/error-test.jsonl
+  '
+- Kết quả mong đợi:
+  + File xuất hiện trong `/quarantine/movielens/dt=2026-10-11/error-test.jsonl`.
+  + Vùng `/raw/ratings` không bị nhiễm dữ liệu rác.
+
+--------------------------------------------------------------------------------
+TC-06: KIỂM THỬ ĐỌC/GHI CHO MAPREDUCE
+- Mục đích: Đảm bảo Hadoop MapReduce có thể đọc input và ghi output vào `/batch/`.
+- Lệnh thực thi (Chạy WordCount test mẫu tích hợp sẵn trong Hadoop):
+  docker exec -it hdfs-namenode hadoop jar \
+    /opt/hadoop/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.3.6.jar \
+    wordcount /movies/ref/current/movie_reference.tsv /batch/movie_stats/run_id=test_run/
+- Kết quả mong đợi:
+  + Job MapReduce hoàn thành thành công (Exit code 0).
+  + Kiểm tra: `hdfs dfs -ls /batch/movie_stats/run_id=test_run/` thấy xuất hiện file `_SUCCESS` 
+    và `part-r-00000`.
+
+--------------------------------------------------------------------------------
+TC-07: ĐO KIỂM BỘ NHỚ RAM VÀ TẢI CPU
+- Mục đích: Đảm bảo cụm HDFS không ngốn quá 1.5 GB RAM trên Ubuntu VM 8 GB.
+- Lệnh thực thi:
+  docker stats --no-stream hdfs-namenode hdfs-datanode1 hdfs-datanode2
+- Kết quả mong đợi:
+  + `hdfs-namenode`: MEM USAGE <= 850 MiB.
+  + `hdfs-datanode1`: MEM USAGE <= 350 MiB.
+  + `hdfs-datanode2`: MEM USAGE <= 350 MiB.
+  + Tổng RAM của cả 3 containers <= 1.55 GiB.
+================================================================================

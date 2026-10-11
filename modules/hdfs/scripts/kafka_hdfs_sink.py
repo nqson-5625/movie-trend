@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""
+kafka_hdfs_sink.py - Kafka to HDFS Ingestion Daemon
+Phụ trách: Giang (Module 03 - HDFS)
+Chức năng: Lắng nghe Kafka topics (movie-events, tmdb-snapshots) và ghi vào HDFS
+đúng quy chuẩn phân vùng dt=YYYY-MM-DD, tuân thủ DATA_CONTRACT.md.
+"""
+
+import json
+import logging
+import os
+import sys
+import time
+from collections import defaultdict
+from datetime import datetime
+
+try:
+    from kafka import KafkaConsumer
+    from hdfs import InsecureClient
+except ImportError:
+    print("Vui lòng cài đặt thư viện phụ thuộc: pip install kafka-python hdfs")
+    sys.exit(1)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] (Module03-Sink) %(message)s'
+)
+logger = logging.getLogger("HDFSSink")
+
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+TOPICS = ["movie-events", "tmdb-snapshots"]
+GROUP_ID = os.getenv("KAFKA_GROUP_ID", "hdfs-sink-group")
+
+WEBHDFS_URL = os.getenv("WEBHDFS_URL", "http://localhost:9870")
+HDFS_USER = os.getenv("HDFS_USER", "root")
+
+BATCH_SIZE = int(os.getenv("SINK_BATCH_SIZE", "500"))
+FLUSH_INTERVAL_SEC = int(os.getenv("SINK_FLUSH_INTERVAL", "30"))
+
+
+class HDFSSinkDaemon:
+    def __init__(self):
+        logger.info(f"Khởi tạo HDFS Client tới {WEBHDFS_URL} (user={HDFS_USER})")
+        self.hdfs_client = InsecureClient(WEBHDFS_URL, user=HDFS_USER)
+
+        logger.info(f"Kết nối tới Kafka tại {KAFKA_BOOTSTRAP_SERVERS}, Topics: {TOPICS}")
+        self.consumer = KafkaConsumer(
+            *TOPICS,
+            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS.split(","),
+            group_id=GROUP_ID,
+            auto_offset_reset='earliest',
+            enable_auto_commit=True,
+            value_deserializer=lambda m: m.decode('utf-8', errors='replace')
+        )
+        self.buffers = defaultdict(list)
+        self.quarantine_buffer = defaultdict(list)
+        self.last_flush_time = time.time()
+
+    def parse_partition_date(self, event_time_str: str) -> str:
+        """Trích xuất YYYY-MM-DD từ chuỗi event_time ISO 8601 UTC."""
+        try:
+            clean_str = event_time_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_str)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            return datetime.utcnow().strftime("%Y-%m-%d")
+
+    def validate_and_route(self, topic: str, raw_text: str):
+        """Kiểm tra cấu trúc và điều hướng vào buffer chuẩn hoặc quarantine."""
+        try:
+            data = json.loads(raw_text)
+            if "schema_version" not in data or "event_id" not in data or "event_time" not in data:
+                raise ValueError("Thiếu các trường bắt buộc (schema_version/event_id/event_time)")
+
+            dt_str = self.parse_partition_date(data["event_time"])
+            self.buffers[(topic, dt_str)].append(json.dumps(data))
+        except Exception as e:
+            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            bad_record = {
+                "raw_payload": raw_text,
+                "error_reason": str(e),
+                "failed_at": datetime.utcnow().isoformat() + "Z"
+            }
+            self.quarantine_buffer[(topic, today_str)].append(json.dumps(bad_record))
+
+    def flush_to_hdfs(self):
+        """Ghi dữ liệu trong buffer xuống HDFS."""
+        now = time.time()
+
+        # 1. Flush vùng dữ liệu chuẩn
+        for (topic, dt_str), records in list(self.buffers.items()):
+            if not records:
+                continue
+
+            source_folder = "ratings" if topic == "movie-events" else "tmdb"
+            hdfs_dir = f"/raw/{source_folder}/dt={dt_str}"
+            file_name = f"part-{int(now)}-{len(records)}.jsonl"
+            hdfs_path = f"{hdfs_dir}/{file_name}"
+
+            payload = "\n".join(records) + "\n"
+            try:
+                self.hdfs_client.makedirs(hdfs_dir)
+                self.hdfs_client.write(hdfs_path, data=payload.encode('utf-8'), overwrite=False)
+                logger.info(f"Đã ghi {len(records)} bản ghi vào HDFS: {hdfs_path}")
+                self.buffers[(topic, dt_str)].clear()
+            except Exception as e:
+                logger.error(f"Lỗi khi ghi HDFS {hdfs_path}: {e}")
+
+        # 2. Flush vùng quarantine
+        for (topic, dt_str), bad_records in list(self.quarantine_buffer.items()):
+            if not bad_records:
+                continue
+            source_folder = "movielens" if topic == "movie-events" else "tmdb"
+            quarantine_dir = f"/quarantine/{source_folder}/dt={dt_str}"
+            file_name = f"error-{int(now)}-{len(bad_records)}.jsonl"
+            hdfs_path = f"{quarantine_dir}/{file_name}"
+
+            payload = "\n".join(bad_records) + "\n"
+            try:
+                self.hdfs_client.makedirs(quarantine_dir)
+                self.hdfs_client.write(hdfs_path, data=payload.encode('utf-8'), overwrite=False)
+                logger.warning(f"Đã cách ly {len(bad_records)} bản ghi lỗi vào: {hdfs_path}")
+                self.quarantine_buffer[(topic, dt_str)].clear()
+            except Exception as e:
+                logger.error(f"Lỗi khi ghi quarantine {hdfs_path}: {e}")
+
+        self.last_flush_time = now
+
+    def run(self):
+        logger.info("Bắt đầu lắng nghe sự kiện từ Kafka...")
+        try:
+            while True:
+                msg_pack = self.consumer.poll(timeout_ms=1000, max_records=100)
+                for topic_partition, messages in msg_pack.items():
+                    for message in messages:
+                        self.validate_and_route(message.topic, message.value)
+
+                total_pending = sum(len(v) for v in self.buffers.values()) + \
+                                sum(len(v) for v in self.quarantine_buffer.values())
+
+                time_elapsed = time.time() - self.last_flush_time
+                if total_pending >= BATCH_SIZE or (total_pending > 0 and time_elapsed >= FLUSH_INTERVAL_SEC):
+                    self.flush_to_hdfs()
+
+        except KeyboardInterrupt:
+            logger.info("Dừng Sink Daemon theo yêu cầu người dùng...")
+            self.flush_to_hdfs()
+        finally:
+            self.consumer.close()
+            logger.info("Đã đóng kết nối Kafka.")
+
+
+if __name__ == "__main__":
+    daemon = HDFSSinkDaemon()
+    daemon.run()

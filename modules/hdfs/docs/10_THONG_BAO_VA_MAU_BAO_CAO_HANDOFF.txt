@@ -1,0 +1,103 @@
+================================================================================
+     10. THÔNG BÁO BÀN GIAO VÀ MẪU BÁO CÁO TIẾN ĐỘ - MODULE 03: HDFS
+================================================================================
+Người thực hiện: Giang
+Mục tiêu: Cung cấp các mẫu thông điệp bàn giao chuẩn chỉnh gửi cho Team Lead và
+các Module Owners (Module 01, Module 02, Module 04).
+================================================================================
+
+--------------------------------------------------------------------------------
+1. MẪU THÔNG BÁO GỬI TEAM LEAD & MODULE 01 (GIẢI QUYẾT BƯỚC 16)
+--------------------------------------------------------------------------------
+(Dùng để nhắn trên Zalo / Discord / Slack nhóm hoặc đính kèm báo cáo)
+
+Tiêu đề: [Module 03 - HDFS] Đã sẵn sàng hạ tầng và Endpoint cho Bước 16 (Publish Reference)
+
+Chào cả nhóm và bạn phụ trách Module 01,
+Giang (Module 03 - HDFS) xin thông báo cụm HDFS đã được khởi tạo và sẵn sàng tiếp nhận 
+Canonical Movie Reference từ Module 01 với các thông số sau:
+
+1. Trạng thái hạ tầng:
+   - Cụm HDFS gồm 1 NameNode và 2 DataNodes đang hoạt động bình thường (SafeMode: OFF).
+   - Đã cấu hình tối ưu bộ nhớ: Tổng RAM cụm HDFS chỉ chiếm ~1.3 GB RAM.
+2. Thông số kết nối (Endpoints):
+   - HDFS RPC: `hdfs://localhost:9000` (hoặc `hdfs://namenode:9000`)
+   - WebHDFS REST API: `http://localhost:9870/webhdfs/v1`
+   - NameNode Web UI: `http://localhost:9870`
+3. Đường dẫn HDFS đã tạo sẵn:
+   - Thư mục version: `/movies/ref/version=<ref_version>/`
+   - Thư mục canonical downstream: `/movies/ref/current/movie_reference.tsv`
+4. Cách thức bàn giao:
+   - Module 01 có thể chạy script bàn giao tự động:
+     `python modules/hdfs/scripts/publish_reference.py`
+   - Script sẽ tự động kiểm tra số dòng (9.743 dòng) và mã băm SHA256 trước khi 
+     cập nhật atomic sang `/movies/ref/current/`.
+
+Đề nghị Module 01 phối hợp chạy thử nghiệm bàn giao Bước 16 để đóng task!
+
+--------------------------------------------------------------------------------
+2. MẪU THÔNG BÁO GỬI MODULE 02 (KAFKA / INGESTION)
+--------------------------------------------------------------------------------
+
+Tiêu đề: [Module 03 - HDFS] Xác nhận cấu trúc lưu trữ Raw Events và Sink Consumer
+
+Chào bạn phụ trách Module 02,
+Để chuẩn bị tiếp nhận dữ liệu từ Kafka xuống HDFS, Giang đã thiết lập sẵn sàng:
+
+1. Quy chuẩn phân vùng và định dạng file:
+   - MovieLens: `/raw/ratings/dt=YYYY-MM-DD/part-*.jsonl` (schema v1.0)
+   - TMDB: `/raw/tmdb/dt=YYYY-MM-DD/part-*.jsonl` (schema v1.0)
+   - Phân vùng `dt=YYYY-MM-DD` được bóc tách từ trường `event_time` (UTC).
+2. Xử lý bản ghi lỗi (Quarantine):
+   - Bản ghi lỗi format hoặc thiếu trường sẽ tự động được cách ly tại:
+     `/quarantine/<source>/dt=YYYY-MM-DD/error-*.jsonl`
+3. Phương án Sink:
+   - Module 03 đã chuẩn bị sẵn Ingestion Daemon (`kafka_hdfs_sink.py`) siêu nhẹ 
+     (~40 MB RAM) để kéo dữ liệu từ topic `movie-events` và `tmdb-snapshots`.
+   - Khi Module 02 bắt đầu bắn message lên Kafka, vui lòng thông báo để Giang kích 
+     hoạt tiến trình Sink.
+
+--------------------------------------------------------------------------------
+3. MẪU THÔNG BÁO GỬI MODULE 04 (HADOOP MAPREDUCE - ĐỖ SƠN)
+--------------------------------------------------------------------------------
+
+Tiêu đề: [Module 03 - HDFS] Sẵn sàng dữ liệu đầu vào và thư mục Batch Output cho MapReduce
+
+Chào Đỗ Sơn (Module 04),
+Giang đã chuẩn bị xong môi trường lưu trữ HDFS phục vụ các Job MapReduce:
+
+1. Dữ liệu đầu vào (Input Paths):
+   - Ratings thô: `hdfs://namenode:9000/raw/ratings/dt=*/part-*.jsonl`
+   - Reference để join thể loại/phim: `hdfs://namenode:9000/movies/ref/current/movie_reference.tsv`
+2. Thư mục đầu ra (Output Paths) đã được cấp quyền `chmod 777`:
+   - `hdfs://namenode:9000/batch/movie_stats/run_id=<run_id>/`
+   - `hdfs://namenode:9000/batch/movie_daily_stats/run_id=<run_id>/`
+   - `hdfs://namenode:9000/batch/genre_daily_stats/run_id=<run_id>/`
+3. Sơn có thể chạy thử lệnh kiểm tra kết nối bằng script:
+   `bash modules/hdfs/scripts/verify_mapreduce_handoff.sh`
+
+--------------------------------------------------------------------------------
+4. DÀN Ý TRÌNH BÀY PHẦN MODULE 03 KHI BÁO CÁO BẢO VỆ BTL
+--------------------------------------------------------------------------------
+
+Slide 1: Giới thiệu Module 03 - Tầng lưu trữ HDFS trong Lambda Architecture
+- Vai trò: Lưu trữ bất biến dữ liệu thô (Raw Zone) và dữ liệu tham chiếu chuẩn hóa (Reference).
+- Yêu cầu kỹ thuật: Tối ưu bộ nhớ nghiêm ngặt cho môi trường VM 8 GB RAM.
+
+Slide 2: Thiết kế kiến trúc và Cây thư mục HDFS
+- Sơ đồ cây thư mục: `/raw`, `/quarantine`, `/movies/ref`, `/batch`.
+- Chiến lược phân vùng theo ngày của `event_time` (`dt=YYYY-MM-DD`).
+
+Slide 3: Tối ưu hóa tài nguyên trên 8 GB RAM
+- Bảng đối chiếu JVM Heap (Mặc định vs Tinh chỉnh): Giảm từ > 3 GB xuống 1.3 GB RAM.
+- Cấu hình Block size 32 MB và Replication = 2.
+
+Slide 4: Các mốc tích hợp thành công (Handoff)
+- Hoàn thành Bước 16: Tiếp nhận và publish `movie_reference.tsv` (9.742 phim) có kiểm tra SHA256.
+- Sink từ Kafka: Cơ chế Python Ingestion Daemon phân vùng ngày và xử lý quarantine.
+- Cung cấp dữ liệu thành công cho Hadoop MapReduce (Module 04).
+
+Slide 5: Kết quả nghiệm thu (Demo trực tiếp)
+- Demo Web UI NameNode (`http://localhost:9870`).
+- Demo xem nội dung file trên HDFS và kết quả lệnh `hdfs dfsadmin -report`.
+================================================================================

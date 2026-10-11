@@ -1,0 +1,268 @@
+================================================================================
+         05. HƯỚNG DẪN CÀI ĐẶT VÀ TRIỂN KHAI CỤM HDFS - MODULE 03
+================================================================================
+Người thực hiện: Giang
+Môi trường: Ubuntu Linux (8 GB RAM)
+Công nghệ: Docker Compose (Khuyến nghị cho Dev/Demo) & Kubernetes (k3s)
+================================================================================
+
+--------------------------------------------------------------------------------
+PHƯƠNG ÁN 1: TRIỂN KHAI BẰNG DOCKER COMPOSE (NHANH, ỔN ĐỊNH, DỄ DEMO)
+--------------------------------------------------------------------------------
+
+Đây là phương án tối ưu nhất để phát triển nội bộ và chạy thử nghiệm trên máy ảo 
+8 GB RAM. Phương án này sử dụng image chuẩn `apache/hadoop:3.3.6` (hoặc image Hadoop 3 
+tương đương), cấu hình 1 NameNode và 2 DataNodes với giới hạn RAM chặt chẽ.
+
+1. TẠO FILE `docker-compose.yml`:
+Tạo thư mục triển khai và lưu file `docker-compose.yml` với nội dung sau:
+
+```yaml
+version: '3.8'
+
+services:
+  namenode:
+    image: apache/hadoop:3.3.6
+    container_name: hdfs-namenode
+    hostname: namenode
+    user: root
+    command: ["hdfs", "namenode"]
+    ports:
+      - "9870:9870"      # Web UI & WebHDFS HTTP
+      - "9000:9000"      # HDFS RPC port
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - HADOOP_NAMENODE_OPTS=-Xms512m -Xmx768m -XX:+UseG1GC
+      - CORE-SITE.XML_fs.defaultFS=hdfs://namenode:9000
+      - CORE-SITE.XML_hadoop.http.staticuser.user=root
+      - CORE-SITE.XML_hadoop.proxyuser.root.hosts=*
+      - CORE-SITE.XML_hadoop.proxyuser.root.groups=*
+      - HDFS-SITE.XML_dfs.replication=2
+      - HDFS-SITE.XML_dfs.permissions.enabled=false
+      - HDFS-SITE.XML_dfs.webhdfs.enabled=true
+      - HDFS-SITE.XML_dfs.namenode.name.dir=/opt/hadoop/data/nameNode
+      - HDFS-SITE.XML_dfs.namenode.rpc-address=namenode:9000
+      - HDFS-SITE.XML_dfs.namenode.http-address=0.0.0.0:9870
+      - HDFS-SITE.XML_dfs.blocksize=33554432 # 32MB block
+    volumes:
+      - namenode_data:/opt/hadoop/data/nameNode
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    networks:
+      - bigdata-net
+
+  datanode1:
+    image: apache/hadoop:3.3.6
+    container_name: hdfs-datanode1
+    hostname: datanode1
+    user: root
+    command: ["hdfs", "datanode"]
+    ports:
+      - "9864:9864"      # DataNode 1 Web UI
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - HADOOP_DATANODE_OPTS=-Xms256m -Xmx384m -XX:+UseG1GC
+      - CORE-SITE.XML_fs.defaultFS=hdfs://namenode:9000
+      - HDFS-SITE.XML_dfs.replication=2
+      - HDFS-SITE.XML_dfs.permissions.enabled=false
+      - HDFS-SITE.XML_dfs.webhdfs.enabled=true
+      - HDFS-SITE.XML_dfs.datanode.data.dir=/opt/hadoop/data/dataNode
+      - HDFS-SITE.XML_dfs.blocksize=33554432
+    volumes:
+      - datanode1_data:/opt/hadoop/data/dataNode
+    depends_on:
+      - namenode
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - bigdata-net
+
+  datanode2:
+    image: apache/hadoop:3.3.6
+    container_name: hdfs-datanode2
+    hostname: datanode2
+    user: root
+    command: ["hdfs", "datanode"]
+    ports:
+      - "9865:9864"      # DataNode 2 Web UI
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - HADOOP_DATANODE_OPTS=-Xms256m -Xmx384m -XX:+UseG1GC
+      - CORE-SITE.XML_fs.defaultFS=hdfs://namenode:9000
+      - HDFS-SITE.XML_dfs.replication=2
+      - HDFS-SITE.XML_dfs.permissions.enabled=false
+      - HDFS-SITE.XML_dfs.webhdfs.enabled=true
+      - HDFS-SITE.XML_dfs.datanode.data.dir=/opt/hadoop/data/dataNode
+      - HDFS-SITE.XML_dfs.blocksize=33554432
+    volumes:
+      - datanode2_data:/opt/hadoop/data/dataNode
+    depends_on:
+      - namenode
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - bigdata-net
+
+volumes:
+  namenode_data:
+  datanode1_data:
+  datanode2_data:
+
+networks:
+  bigdata-net:
+    name: bigdata-net
+    driver: bridge
+```
+
+2. CÁC BƯỚC KHỞI ĐỘNG VÀ VẬN HÀNH:
+
+Bước 1: Khởi động cụm HDFS:
+```bash
+docker compose up -d
+```
+
+Bước 2: Kiểm tra trạng thái containers:
+```bash
+docker compose ps
+```
+Cả 3 container `hdfs-namenode`, `hdfs-datanode1`, `hdfs-datanode2` phải ở trạng thái "Up".
+
+Bước 3: Kiểm tra báo cáo cụm HDFS bằng lệnh CLI:
+```bash
+docker exec -it hdfs-namenode hdfs dfsadmin -report
+```
+Kết quả cần thấy:
+- `Live datanodes (2)`
+- Tỷ lệ dung lượng sử dụng bình thường.
+
+Bước 4: Kiểm tra Web UI trên trình duyệt:
+Mở trình duyệt truy cập: `http://localhost:9870`
+- Tab **Overview**: Trạng thái SafeMode = OFF.
+- Tab **Datanodes**: Thấy đủ 2 DataNode `datanode1` và `datanode2`.
+- Tab **Utilities -> Browse the file system**: Xem cây thư mục trực quan.
+
+--------------------------------------------------------------------------------
+PHƯƠNG ÁN 2: TRIỂN KHAI TRÊN KUBERNETES (K3S TRÊN UBUNTU)
+--------------------------------------------------------------------------------
+
+Nếu nhóm yêu cầu bắt buộc chạy trên Kubernetes theo đúng mô tả mục tiêu trong README:
+- KHÔNG dùng Minikube hoặc Kubeadm (vì rất nặng và dễ chiếm hết 8GB RAM).
+- KHUYẾN NGHỊ: Dùng **k3s** (Lightweight Kubernetes của Rancher), chỉ tốn ~500MB RAM.
+
+1. Cài đặt k3s cực nhanh trên Ubuntu:
+```bash
+curl -sfL https://get.k3s.io | sh -
+# Cấp quyền cho user hiện tại:
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+```
+
+2. Triển khai HDFS Manifest trên k3s:
+Tạo file `hdfs-k8s.yaml`:
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bigdata
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode-svc
+  namespace: bigdata
+spec:
+  ports:
+    - name: rpc
+      port: 9000
+      targetPort: 9000
+    - name: web
+      port: 9870
+      targetPort: 9870
+  selector:
+    app: hdfs-namenode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hdfs-namenode
+  namespace: bigdata
+spec:
+  serviceName: namenode-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hdfs-namenode
+  template:
+    metadata:
+      labels:
+        app: hdfs-namenode
+    spec:
+      containers:
+        - name: namenode
+          image: apache/hadoop:3.3.6
+          command: ["hdfs", "namenode"]
+          resources:
+            limits:
+              memory: "1024Mi"
+            requests:
+              memory: "512Mi"
+          env:
+            - name: CORE-SITE.XML_fs.defaultFS
+              value: "hdfs://namenode-svc.bigdata.svc.cluster.local:9000"
+            - name: HDFS-SITE.XML_dfs.webhdfs.enabled
+              value: "true"
+            - name: HDFS-SITE.XML_dfs.replication
+              value: "2"
+            - name: HADOOP_NAMENODE_OPTS
+              value: "-Xms512m -Xmx768m"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hdfs-datanode
+  namespace: bigdata
+spec:
+  serviceName: datanode-svc
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hdfs-datanode
+  template:
+    metadata:
+      labels:
+        app: hdfs-datanode
+    spec:
+      containers:
+        - name: datanode
+          image: apache/hadoop:3.3.6
+          command: ["hdfs", "datanode"]
+          resources:
+            limits:
+              memory: "512Mi"
+            requests:
+              memory: "256Mi"
+          env:
+            - name: CORE-SITE.XML_fs.defaultFS
+              value: "hdfs://namenode-svc.bigdata.svc.cluster.local:9000"
+            - name: HDFS-SITE.XML_dfs.webhdfs.enabled
+              value: "true"
+            - name: HADOOP_DATANODE_OPTS
+              value: "-Xms256m -Xmx384m"
+```
+
+Áp dụng lên cụm:
+```bash
+kubectl apply -f hdfs-k8s.yaml
+kubectl get pods -n bigdata
+```
+Port-forward để truy cập Web UI từ ngoài:
+```bash
+kubectl port-forward svc/namenode-svc 9870:9870 -n bigdata
+```
+================================================================================

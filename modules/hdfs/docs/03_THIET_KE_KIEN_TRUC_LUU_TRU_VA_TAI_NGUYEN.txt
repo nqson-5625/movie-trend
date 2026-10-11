@@ -1,0 +1,160 @@
+================================================================================
+     03. THIẾT KẾ KIẾN TRÚC LƯU TRỮ VÀ QUY HOẠCH TÀI NGUYÊN - MODULE 03: HDFS
+================================================================================
+Người thực hiện: Giang
+Hệ thống: HDFS Storage Cluster (Hadoop 3.3.x)
+Ràng buộc cốt lõi: 01 VM Ubuntu với 8 GB RAM chạy toàn bộ hệ sinh thái
+================================================================================
+
+--------------------------------------------------------------------------------
+1. SƠ ĐỒ CÂY THƯ MỤC HDFS HOÀN CHỈNH
+--------------------------------------------------------------------------------
+
+HDFS Namespace được tổ chức chuẩn hóa như sau:
+
+/
+├── raw/                                [Append-only, Immutable, Replayable]
+│   ├── ratings/                        [Dữ liệu MovieLens]
+│   │   ├── dt=2026-10-01/
+│   │   │   ├── part-00000.jsonl
+│   │   │   └── part-00001.jsonl
+│   │   └── dt=2026-10-02/
+│   │       └── part-00000.jsonl
+│   └── tmdb/                           [Dữ liệu snapshot TMDB API]
+│       └── dt=2026-10-08/
+│           └── part-00000.jsonl
+│
+├── quarantine/                         [Vùng cách ly bản ghi lỗi]
+│   ├── movielens/
+│   │   └── dt=YYYY-MM-DD/
+│   │       └── error-*.jsonl
+│   └── tmdb/
+│       └── dt=YYYY-MM-DD/
+│           └── error-*.jsonl
+│
+├── movies/
+│   └── ref/                            [Canonical Movie Reference]
+│       ├── current/
+│       │   └── movie_reference.tsv     <-- DOWNSTREAM READ ENTRYPOINT
+│       └── version=20261004-5b4e04a2/
+│           ├── movie_reference.tsv
+│           └── manifest.json
+│
+├── batch/                              [Vùng dữ liệu cho Hadoop MapReduce]
+│   ├── movie_stats/
+│   │   └── run_id=20261004T050000Z/
+│   │       ├── part-r-00000
+│   │       └── _SUCCESS
+│   ├── movie_daily_stats/
+│   │   └── run_id=20261004T050000Z/
+│   ├── genre_daily_stats/
+│   │   └── run_id=20261004T050000Z/
+│   └── _meta/
+│       └── run_id=20261004T050000Z/
+│           └── manifest.json
+│
+└── tmp/
+    └── hadoop-yarn/                    [Thư mục tạm tính toán nếu dùng YARN]
+
+--------------------------------------------------------------------------------
+2. CHIẾN LƯỢC PHÂN VÙNG VÀ ĐỊNH DẠNG TỆP TIN
+--------------------------------------------------------------------------------
+
+A. Chiến lược phân vùng (Partitioning Strategy):
+- Partition key: `dt=YYYY-MM-DD` (theo chuẩn Hive/Spark partition).
+- Căn cứ xác định ngày: Bắt buộc lấy ngày từ trường `event_time` (UTC).
+- Xử lý sự kiện đến muộn (Late-arriving events):
+  Nếu một sự kiện phát sinh ngày `2026-10-01` nhưng đến ngày `2026-10-05` mới tới Kafka 
+  và sink xuống HDFS, file phải được ghi vào thư mục `/raw/ratings/dt=2026-10-01/`.
+  Điều này đảm bảo tính đúng đắn khi MapReduce hoặc Spark quét theo khoảng ngày nghiệp vụ.
+
+B. Định dạng tệp tin (File Formats):
+- Vùng Raw: Sử dụng định dạng JSON Lines (`.jsonl`).
+  Ưu điểm: Dễ dàng append liên tục từ streaming, human-readable, schema linh hoạt, 
+  hỗ trợ đầy đủ JSON Schema validator của dự án.
+- Vùng Reference: Sử dụng định dạng TSV UTF-8 có header.
+  Ưu điểm: MapReduce và Spark dễ dàng parse mà không tốn chi phí giải mã JSON phức tạp, 
+  phù hợp đưa vào Hadoop DistributedCache.
+
+--------------------------------------------------------------------------------
+3. TÍNH TOÁN DUNG LƯỢNG LƯU TRỮ (CAPACITY SIZING)
+--------------------------------------------------------------------------------
+
+Quy mô dữ liệu đồ án:
+1. MovieLens dataset (bản nhỏ trong repo):
+   - 100.836 ratings.
+   - Kích thước thô khi chuyển thành JSONL: ~15 MB.
+2. TMDB API Snapshots:
+   - 20 phim trending mỗi lần crawl.
+   - Kích thước mỗi snapshot JSONL: ~6 KB.
+   - Giả sử crawl 1 lần/giờ liên tục trong 1 tuần: 168 snapshots x 6 KB ≈ 1 MB.
+3. Canonical Movie Reference:
+   - 9.742 phim.
+   - Kích thước TSV: ~1.2 MB.
+4. Batch MapReduce Output:
+   - Tổng hợp 9.742 phim: ~1 MB.
+=> TỔNG DUNG LƯỢNG HDFS DỰ KIẾN: Dưới 100 MB.
+=> ĐÁNH GIÁ: Hệ thống không bị áp lực về dung lượng đĩa cứng, nhưng chịu áp lực lớn 
+về BỘ NHỚ RAM do phải chạy đồng thời nhiều service trên 1 máy ảo Ubuntu 8 GB.
+
+--------------------------------------------------------------------------------
+4. BÀI TOÁN TỐI ƯU BỘ NHỚ RAM TRÊN MÁY ẢO 8 GB
+--------------------------------------------------------------------------------
+
+A. Bảng phân bổ ngân sách RAM toàn hệ thống (Memory Budget):
++-----------------------------------+-------------------+---------------------+
+| Thành phần                        | RAM Mặc định      | RAM Tối ưu hóa      |
++-----------------------------------+-------------------+---------------------+
+| Hệ điều hành Ubuntu + Docker Engine| 1.0 GB            | 1.0 GB              |
+| HDFS NameNode                     | 1.0 GB - 2.0 GB   | 768 MB (Max 1.0 GB) |
+| HDFS DataNode 1                   | 1.0 GB            | 256 MB (Max 384 MB) |
+| HDFS DataNode 2                   | 1.0 GB            | 256 MB (Max 384 MB) |
+| Kafka (KRaft mode - 1 Broker)     | 1.0 GB            | 768 MB              |
+| Spark Streaming / Spark SQL       | 2.0 GB - 4.0 GB   | 2.0 GB              |
+| Elasticsearch (Single Node)       | 2.0 GB            | 1.5 GB (Heap 1 GB)  |
+| HDFS Sink + Python Daemons        | -                 | 256 MB              |
+| Streamlit Dashboard               | -                 | 512 MB              |
++-----------------------------------+-------------------+---------------------+
+| TỔNG CỘNG                         | > 12 GB (OOM)     | ~ 7.5 GB (AN TOÀN)  |
++-----------------------------------+-------------------+---------------------+
+
+B. Thiết lập thông số JVM Heap cụ thể cho HDFS:
+Trong file cấu hình môi trường hoặc Docker:
+- NameNode JVM:
+  export HADOOP_NAMENODE_OPTS="-Xms512m -Xmx768m -XX:+UseG1GC"
+- DataNode JVM:
+  export HADOOP_DATANODE_OPTS="-Xms256m -Xmx384m -XX:+UseG1GC"
+
+C. Tinh chỉnh thông số HDFS trong `hdfs-site.xml`:
+1. Giảm Block Size:
+   <property>
+       <name>dfs.blocksize</name>
+       <value>33554432</value> <!-- 32 MB thay vì mặc định 128 MB -->
+   </property>
+   * Lý do: Dữ liệu đồ án nhỏ (~15MB), block size 32MB giúp Hadoop xử lý nhanh, 
+     không lãng phí bộ nhớ quản lý của NameNode.
+
+2. Cấu hình Replication Factor:
+   <property>
+       <name>dfs.replication</name>
+       <value>2</value> <!-- Hoặc 1 nếu chỉ chạy 1 DataNode -->
+   </property>
+
+3. Tắt kiểm tra quyền nghiêm ngặt khi dev local:
+   <property>
+       <name>dfs.permissions.enabled</name>
+       <value>false</value>
+   </property>
+   * Lý do: Tránh lỗi Permission Denied khi các container Python, Spark, MapReduce 
+     chạy với các user Linux khác nhau (root, hdfs, ubuntu).
+
+4. Rút ngắn thời gian thoát Safe Mode:
+   <property>
+       <name>dfs.namenode.safemode.threshold-pct</name>
+       <value>0.99f</value>
+   </property>
+   <property>
+       <name>dfs.namenode.safemode.extension</name>
+       <value>0</value>
+   </property>
+================================================================================
