@@ -1,0 +1,14 @@
+{
+  "topics": [
+    {
+      "name": "movie-events",
+      "partitions": 1,
+      "replication_factor": 1
+    },
+    {
+      "name": "tmdb-snapshots",
+      "partitions": 1,
+      "replication_factor": 1
+    }
+  ]
+}
