@@ -1,0 +1,168 @@
+{
+  "measured_at": "2026-10-11T08:25:29Z",
+  "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "memory": {
+    "MemTotal_MiB": 3917.23828125,
+    "MemAvailable_MiB": 1360.125,
+    "SwapTotal_MiB": 4096.0,
+    "SwapFree_MiB": 3996.4140625
+  },
+  "broker_heap": "-Xms256m -Xmx512m",
+  "batch_size": 100,
+  "input": "data/prepared/movielens/ratings_sorted.csv",
+  "runs": [
+    {
+      "requested_rate": 10,
+      "count": 200,
+      "producer": {
+        "attempted": 200,
+        "acknowledged": 200,
+        "failed": 0,
+        "unconfirmed": 0,
+        "next_row": 200,
+        "elapsed_seconds": 20.049154359000568,
+        "events_per_second": 9.975481713390757,
+        "interrupted": false
+      },
+      "consumer": {
+        "received": 200,
+        "valid": 200,
+        "invalid": 0,
+        "duplicate": 0,
+        "conflict": 0,
+        "offset_regressions": 0,
+        "offset_gaps": 0,
+        "latency_seconds_mean": 0.8923407050000002,
+        "latency_seconds_max": 4.752121,
+        "lag": {
+          "movie-events:0": {
+            "low": 0,
+            "high": 200,
+            "committed": 200,
+            "lag": 0
+          },
+          "tmdb-snapshots:0": {
+            "low": 0,
+            "high": 0,
+            "committed": -1001,
+            "lag": 0
+          }
+        },
+        "elapsed_seconds": 20.965155261999826,
+        "events_per_second": 9.539638390492053,
+        "interrupted": false
+      },
+      "peak_rss_MiB": {
+        "python": 41.6953125,
+        "kafka": 386.7421875
+      },
+      "cpu_percent_one_core": {
+        "python": 3.14771397828899,
+        "kafka": 22.129383120092296
+      },
+      "minimum_available_MiB": 983.8046875
+    },
+    {
+      "requested_rate": 100,
+      "count": 1000,
+      "producer": {
+        "attempted": 1000,
+        "acknowledged": 1000,
+        "failed": 0,
+        "unconfirmed": 0,
+        "next_row": 1200,
+        "elapsed_seconds": 10.12080909299948,
+        "events_per_second": 98.80631907091194,
+        "interrupted": false
+      },
+      "consumer": {
+        "received": 1000,
+        "valid": 1000,
+        "invalid": 0,
+        "duplicate": 0,
+        "conflict": 0,
+        "offset_regressions": 0,
+        "offset_gaps": 0,
+        "latency_seconds_mean": 0.6707649110000001,
+        "latency_seconds_max": 2.110428,
+        "lag": {
+          "movie-events:0": {
+            "low": 0,
+            "high": 1200,
+            "committed": 1200,
+            "lag": 0
+          },
+          "tmdb-snapshots:0": {
+            "low": 0,
+            "high": 0,
+            "committed": -1001,
+            "lag": 0
+          }
+        },
+        "elapsed_seconds": 11.123360673999741,
+        "events_per_second": 89.90088780789482,
+        "interrupted": false
+      },
+      "peak_rss_MiB": {
+        "python": 43.4453125,
+        "kafka": 408.4921875
+      },
+      "cpu_percent_one_core": {
+        "python": 13.921097574754466,
+        "kafka": 39.78739500397566
+      },
+      "minimum_available_MiB": 946.3515625
+    },
+    {
+      "requested_rate": 500,
+      "count": 2000,
+      "producer": {
+        "attempted": 2000,
+        "acknowledged": 2000,
+        "failed": 0,
+        "unconfirmed": 0,
+        "next_row": 3200,
+        "elapsed_seconds": 4.428868803000114,
+        "events_per_second": 451.58254531245075,
+        "interrupted": false
+      },
+      "consumer": {
+        "received": 2000,
+        "valid": 2000,
+        "invalid": 0,
+        "duplicate": 0,
+        "conflict": 0,
+        "offset_regressions": 0,
+        "offset_gaps": 0,
+        "latency_seconds_mean": 0.8876892675000019,
+        "latency_seconds_max": 1.467568,
+        "lag": {
+          "movie-events:0": {
+            "low": 0,
+            "high": 3200,
+            "committed": 3200,
+            "lag": 0
+          },
+          "tmdb-snapshots:0": {
+            "low": 0,
+            "high": 0,
+            "committed": -1001,
+            "lag": 0
+          }
+        },
+        "elapsed_seconds": 5.433500885000285,
+        "events_per_second": 368.08680854754203,
+        "interrupted": false
+      },
+      "peak_rss_MiB": {
+        "python": 45.4921875,
+        "kafka": 423.1171875
+      },
+      "cpu_percent_one_core": {
+        "python": 35.28303725566672,
+        "kafka": 62.11284683549665
+      },
+      "minimum_available_MiB": 932.921875
+    }
+  ]
+}
