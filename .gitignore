@@ -6,3 +6,6 @@ data/quarantine/
 *.log
 __pycache__/
 .pytest_cache
+
+# Machine-local ingestion checkpoints, snapshot outbox and consumer audit
+data/local/
