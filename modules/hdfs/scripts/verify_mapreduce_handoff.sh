@@ -59,6 +59,6 @@ fi
 EOF
 )
 
-echo "$VERIFY_COMMANDS" | kubectl exec -i -n "$K8S_NAMESPACE" pod/"$K8S_POD_NAME" -- bash
+echo "$VERIFY_COMMANDS" | kubectl exec -i -n "$K8S_NAMESPACE" "$K8S_POD_NAME" -c namenode -- bash
 
 echo "=== HOÀN TẤT KIỂM TRA CHO MODULE 04! ==="

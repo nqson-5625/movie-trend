@@ -101,7 +101,7 @@ def count_lines(filepath: Path) -> int:
 
 
 def run_hdfs_cmd(cmd: list[str]) -> str:
-    full_cmd = ["kubectl", "exec", "-i", "-n", K8S_NAMESPACE, f"pod/{K8S_NAMENODE_POD}", "--", "hdfs", "dfs"] + cmd
+    full_cmd = ["kubectl", "exec", "-i", "-n", K8S_NAMESPACE, K8S_NAMENODE_POD, "-c", "namenode", "--", "hdfs", "dfs"] + cmd
     res = subprocess.run(full_cmd, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"Lỗi lệnh HDFS ({' '.join(cmd)}): {res.stderr.strip()}")
@@ -109,7 +109,7 @@ def run_hdfs_cmd(cmd: list[str]) -> str:
 
 
 def copy_file_to_namenode(local_path: Path, remote_tmp_path: str):
-    cp_cmd = ["kubectl", "cp", "-n", K8S_NAMESPACE, str(local_path), f"{K8S_NAMENODE_POD}:{remote_tmp_path}"]
+    cp_cmd = ["kubectl", "cp", "-n", K8S_NAMESPACE, "-c", "namenode", str(local_path), f"{K8S_NAMENODE_POD}:{remote_tmp_path}"]
     res = subprocess.run(cp_cmd, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"Lỗi sao chép file lên NameNode ({' '.join(cp_cmd)}): {res.stderr.strip()}")

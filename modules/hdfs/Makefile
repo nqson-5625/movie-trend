@@ -119,7 +119,7 @@ status:
 ps: status
 
 report:
-	kubectl exec -it -n $(NAMESPACE) pod/$(NAMENODE_POD) -- hdfs dfsadmin -report
+	kubectl exec -i -n $(NAMESPACE) pod/$(NAMENODE_POD) -- hdfs dfsadmin -report
 
 init:
 	bash "$(MODULE_DIR)/scripts/init_hdfs_dirs.sh"

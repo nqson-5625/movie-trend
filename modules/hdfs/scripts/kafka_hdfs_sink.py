@@ -201,11 +201,11 @@ class HDFSUploader:
         """Ghi file vào HDFS bằng lệnh kubectl exec."""
         try:
             parent_dir = str(Path(hdfs_path).parent).replace("\\", "/")
-            mkdir_cmd = ["kubectl", "exec", "-i", "-n", self.k8s_namespace, f"pod/{self.k8s_pod}", "--",
+            mkdir_cmd = ["kubectl", "exec", "-i", "-n", self.k8s_namespace, self.k8s_pod, "-c", "namenode", "--",
                          "hdfs", "dfs", "-mkdir", "-p", parent_dir]
             subprocess.run(mkdir_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
-            put_cmd = ["kubectl", "exec", "-i", "-n", self.k8s_namespace, f"pod/{self.k8s_pod}", "--",
+            put_cmd = ["kubectl", "exec", "-i", "-n", self.k8s_namespace, self.k8s_pod, "-c", "namenode", "--",
                        "hdfs", "dfs", "-put", "-f", "-", hdfs_path]
             proc = subprocess.run(put_cmd, input=data, text=True, capture_output=True, timeout=15)
             return proc.returncode == 0
@@ -343,18 +343,26 @@ class KafkaHDFSSinkDaemon:
         group_id: str = "hdfs-sink-group",
         topics: Optional[List[str]] = None,
         batch_size: int = 200,
-        flush_interval_sec: int = 30
+        flush_interval_sec: int = 30,
+        max_records: int = 0,
+        idle_exit_sec: int = 0
     ):
         self.servers = bootstrap_servers or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
         self.group_id = group_id or os.getenv("KAFKA_GROUP_ID", "hdfs-sink-group")
         self.topics = topics or ["movie-events", "tmdb-snapshots"]
         self.engine = HDFSSinkEngine(batch_size=batch_size, flush_interval_sec=flush_interval_sec)
+        self.max_records = max_records
+        self.idle_exit_sec = idle_exit_sec
         self.running = True
 
     def run(self):
         """Khởi động lắng nghe Kafka và đẩy định kỳ vào HDFS."""
         logger.info(f"Bắt đầu Ingestion Daemon (Group: {self.group_id}, Topics: {self.topics})")
         logger.info(f"Kafka Bootstrap: {self.servers}")
+        if self.max_records > 0:
+            logger.info(f"Chế độ giới hạn bản ghi: dừng sau {self.max_records} records.")
+        if self.idle_exit_sec > 0:
+            logger.info(f"Chế độ tự động thoát khi rảnh: {self.idle_exit_sec}s không có tin nhắn.")
 
         # Đăng ký xử lý tín hiệu kết thúc an toàn
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -366,11 +374,23 @@ class KafkaHDFSSinkDaemon:
             logger.error("Không thể khởi tạo Kafka Consumer. Vui lòng kiểm tra thư viện hoặc cấu hình.")
             return
 
+        last_activity = time.time()
         try:
             while self.running:
                 messages = self._poll_messages(consumer, timeout=1.0)
-                for topic, raw_val in messages:
-                    self.engine.process_record(topic, raw_val)
+                if messages:
+                    last_activity = time.time()
+                    for topic, raw_val in messages:
+                        self.engine.process_record(topic, raw_val)
+                        if self.max_records > 0 and self.engine.total_processed >= self.max_records:
+                            logger.info(f"Đã đạt mốc {self.max_records} bản ghi yêu cầu. Dừng thu thập.")
+                            self.running = False
+                            break
+                else:
+                    if self.idle_exit_sec > 0 and (time.time() - last_activity) >= self.idle_exit_sec:
+                        logger.info(f"Không có tin nhắn mới trong {self.idle_exit_sec}s. Tự động kết thúc phiên.")
+                        self.running = False
+                        break
 
                 # Kiểm tra điều kiện flush
                 time_elapsed = time.time() - self.engine.last_flush_time
@@ -385,7 +405,7 @@ class KafkaHDFSSinkDaemon:
                 self.engine.flush()
                 self._commit_offset(consumer)
             self._close_consumer(consumer)
-            logger.info("Daemon đã dừng an toàn.")
+            logger.info(f"Daemon hoàn thành! Tổng xử lý: {self.engine.total_processed} (Hợp lệ: {self.engine.total_valid}, Lỗi: {self.engine.total_quarantined})")
 
     def _handle_signal(self, signum, frame):
         logger.info(f"Nhận tín hiệu dừng {signum}, chuẩn bị kết thúc an toàn...")
@@ -430,11 +450,17 @@ class KafkaHDFSSinkDaemon:
         driver, client = consumer_tuple
         records = []
         if driver == "confluent":
-            msg = client.poll(timeout)
-            if msg and not msg.error() and msg.value():
-                records.append((msg.topic(), msg.value().decode("utf-8", errors="replace")))
+            if hasattr(client, "consume"):
+                msgs = client.consume(num_messages=self.engine.batch_size, timeout=timeout)
+                for msg in msgs:
+                    if msg and not msg.error() and msg.value():
+                        records.append((msg.topic(), msg.value().decode("utf-8", errors="replace")))
+            else:
+                msg = client.poll(timeout)
+                if msg and not msg.error() and msg.value():
+                    records.append((msg.topic(), msg.value().decode("utf-8", errors="replace")))
         elif driver == "kafka-python":
-            pack = client.poll(timeout_ms=int(timeout * 1000), max_records=50)
+            pack = client.poll(timeout_ms=int(timeout * 1000), max_records=self.engine.batch_size)
             for tp, msgs in pack.items():
                 for m in msgs:
                     records.append((tp.topic, m.value))
@@ -464,13 +490,17 @@ def main():
     parser.add_argument("--group", default=os.getenv("KAFKA_GROUP_ID", "hdfs-sink-group"))
     parser.add_argument("--batch-size", type=int, default=200)
     parser.add_argument("--flush-interval", type=int, default=30)
+    parser.add_argument("--max-records", type=int, default=0, help="Dừng lại sau khi xử lý đủ số bản ghi (0 = chạy vô hạn)")
+    parser.add_argument("--idle-exit", type=int, default=0, help="Dừng lại nếu không có tin nhắn mới sau N giây (0 = chạy vô hạn)")
     args = parser.parse_args()
 
     daemon = KafkaHDFSSinkDaemon(
         bootstrap_servers=args.bootstrap,
         group_id=args.group,
         batch_size=args.batch_size,
-        flush_interval_sec=args.flush_interval
+        flush_interval_sec=args.flush_interval,
+        max_records=args.max_records,
+        idle_exit_sec=args.idle_exit
     )
     daemon.run()
 

@@ -72,6 +72,6 @@ hdfs dfs -ls /batch
 EOF
 )
 
-echo "$HDFS_INIT_COMMANDS" | kubectl exec -i -n "$K8S_NAMESPACE" pod/"$K8S_POD_NAME" -- bash
+echo "$HDFS_INIT_COMMANDS" | kubectl exec -i -n "$K8S_NAMESPACE" "$K8S_POD_NAME" -c namenode -- bash
 
 echo "=== [MODULE 03] KHỞI TẠO CẤU TRÚC THƯ MỤC THÀNH CÔNG! ==="

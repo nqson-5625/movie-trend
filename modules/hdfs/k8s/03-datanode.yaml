@@ -35,6 +35,18 @@ spec:
       labels:
         app: hdfs-datanode
     spec:
+      initContainers:
+        - name: fix-permissions
+          image: apache/hadoop:3.3.6
+          securityContext:
+            runAsUser: 0
+          command:
+            - "bash"
+            - "-c"
+            - "chown -R hadoop:users /opt/hadoop/data/dataNode && chmod 775 /opt/hadoop/data/dataNode"
+          volumeMounts:
+            - name: datanode-data
+              mountPath: /opt/hadoop/data/dataNode
       containers:
         - name: datanode
           image: apache/hadoop:3.3.6
