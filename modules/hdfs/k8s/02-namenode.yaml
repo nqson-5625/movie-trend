@@ -96,19 +96,19 @@ spec:
               cpu: "1000m"
               memory: "1024Mi"
           livenessProbe:
-            httpGet:
-              path: /dfshealth.html
-              port: 9870
-            initialDelaySeconds: 30
-            periodSeconds: 15
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 60
+            periodSeconds: 20
             timeoutSeconds: 5
+            failureThreshold: 6
           readinessProbe:
-            httpGet:
-              path: /dfshealth.html
-              port: 9870
-            initialDelaySeconds: 20
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
+            failureThreshold: 3
           volumeMounts:
             - name: namenode-data
               mountPath: /opt/hadoop/data/nameNode
