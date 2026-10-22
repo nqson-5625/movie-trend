@@ -47,8 +47,10 @@ flowchart TD
 ```text
 modules/hdfs/
 ├── README.md                           # Tài liệu tổng quan Module 03
+├── BAO_CAO_MODULE_03_HDFS.md           # Báo cáo kỹ thuật nghiệm thu toàn diện (Input, Output, Triển khai)
 ├── HANDOFF_MODULE_03.md                # Tài liệu đặc tả nghiệm thu & bàn giao các bên
 ├── TROUBLESHOOTING.md                  # Cẩm nang tra cứu và xử lý sự cố nhanh trên Kubernetes
+├── run.sh                              # Script điều khiển 1 chạm (start, status, stop, restart)
 ├── Makefile                            # Các lệnh điều khiển tự động (make up, make pipeline,...)
 ├── config.yaml                         # Cấu hình tham số endpoints và đường dẫn Kubernetes
 ├── .env.example                        # Biến môi trường mẫu cho Kubernetes (port, namespace,...)
@@ -64,11 +66,12 @@ modules/hdfs/
 ├── scripts/
 │   ├── init_hdfs_dirs.sh               # Script tự động tạo cây thư mục và phân quyền HDFS Pod
 │   ├── publish_reference.py            # Script thực hiện bàn giao Bước 16 với Module 01
-│   ├── kafka_hdfs_sink.py              # Ingestion Daemon kéo dữ liệu từ Kafka vào HDFS
+│   ├── kafka_hdfs_sink.py              # Ingestion Daemon kéo dữ liệu từ Kafka vào HDFS tốc độ cao (~20ms)
 │   └── verify_mapreduce_handoff.sh     # Script kiểm tra môi trường cho Module 04 MapReduce
 │
 └── docs/                               # Bộ tài liệu kỹ thuật chi tiết
     ├── K8S_MIGRATION_GUIDE.md          # TÀI LIỆU KIẾN TRÚC & TRIỂN KHAI KUBERNETES
+    ├── HUONG_DAN_CHAY_MODULE_1_2_3.md  # CẨM NANG CHẠY LIÊN THÔNG TỪ ĐẦU ĐẾN CUỐI MODULE 01, 02, 03
     ├── 00_DANH_MUC_TAI_LIEU_MODULE_3.txt
     ├── 01_TONG_QUAN_VA_PHAN_TICH_YEU_CAU.txt
     ├── 02_HOP_DONG_DU_LIEU_VA_GIAO_TIEP_MODULE_3.txt

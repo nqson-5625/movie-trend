@@ -159,7 +159,7 @@ start_background_services() {
 
     # 4.1. Port-forward Web UI (9870) và RPC (9000) với cơ chế tự động phục hồi (Auto-Reconnect)
     if ! ss -tulpn 2>/dev/null | grep -q ":9870 "; then
-        nohup bash -c 'while true; do kubectl port-forward --address 0.0.0.0 -n "'"${NAMESPACE}"'" svc/hdfs-namenode-svc 9870:9870 9000:9000 >> "'"${LOG_DIR}"'/port_forward.log" 2>&1; sleep 2; done' >/dev/null 2>&1 &
+        nohup bash -c 'while true; do kubectl port-forward --address 0.0.0.0 -n "'"${NAMESPACE}"'" pod/'"${NAMENODE_POD}"' 9870:9870 9000:9000 >> "'"${LOG_DIR}"'/port_forward.log" 2>&1; sleep 2; done' >/dev/null 2>&1 &
         local pf_pid=$!
         echo "${pf_pid}" > "${LOG_DIR}/port_forward.pid"
         sleep 2
@@ -178,7 +178,7 @@ start_background_services() {
         echo "${sink_pid}" > "${LOG_DIR}/kafka_sink.pid"
         success "Kafka-to-HDFS Ingestion Sink Daemon đã đang chạy ngầm (PID: ${sink_pid})."
     else
-        nohup "${PYTHON_BIN}" "${SCRIPT_DIR}/scripts/kafka_hdfs_sink.py" --batch-size 200 --flush-interval 15 > "${LOG_DIR}/kafka_sink.log" 2>&1 &
+        nohup "${PYTHON_BIN}" "${SCRIPT_DIR}/scripts/kafka_hdfs_sink.py" --batch-size 1000 --flush-interval 10 > "${LOG_DIR}/kafka_sink.log" 2>&1 &
         sink_pid=$!
         echo "${sink_pid}" > "${LOG_DIR}/kafka_sink.pid"
         sleep 2

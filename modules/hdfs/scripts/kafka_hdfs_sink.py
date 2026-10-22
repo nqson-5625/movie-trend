@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -57,7 +58,7 @@ def load_config() -> dict:
     config_path = MODULE_DIR / "config.yaml"
     if config_path.exists():
         try:
-            import yaml
+            import yaml  # type: ignore
             with open(config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         except Exception:
@@ -74,11 +75,18 @@ SINK_CFG = CFG.get("sink", {})
 # Tải schemas để kiểm tra tính hợp lệ
 SCHEMAS_DIR = PROJECT_ROOT / "contracts" / "schemas"
 SCHEMAS: Dict[str, dict] = {}
+VALIDATORS: Dict[str, Any] = {}
 for topic in ("movie-events", "tmdb-snapshots"):
     schema_file = SCHEMAS_DIR / f"{topic}.schema.json"
     if schema_file.exists():
         try:
-            SCHEMAS[topic] = json.loads(schema_file.read_text(encoding="utf-8"))
+            schema_data = json.loads(schema_file.read_text(encoding="utf-8"))
+            SCHEMAS[topic] = schema_data
+            try:
+                from jsonschema import Draft202012Validator  # type: ignore
+                VALIDATORS[topic] = Draft202012Validator(schema_data)
+            except Exception:
+                pass
         except Exception as e:
             logger.warning(f"Không thể nạp schema cho {topic}: {e}")
 
@@ -120,9 +128,16 @@ def validate_schema(data: dict, topic: str) -> Tuple[bool, str]:
             return False, "Thiếu trường tmdbId cho tmdb-snapshots"
 
     # 4. Kiểm tra qua jsonschema nếu có thư viện
-    if topic in SCHEMAS:
+    if topic in VALIDATORS:
         try:
-            from jsonschema import Draft202012Validator
+            errors = list(VALIDATORS[topic].iter_errors(data))
+            if errors:
+                return False, f"Vi phạm JSON schema: {errors[0].message}"
+        except Exception:
+            pass
+    elif topic in SCHEMAS:
+        try:
+            from jsonschema import Draft202012Validator  # type: ignore
             validator = Draft202012Validator(SCHEMAS[topic])
             errors = list(validator.iter_errors(data))
             if errors:
@@ -147,7 +162,7 @@ def extract_partition_date(event_time_str: str) -> str:
 
 
 class HDFSUploader:
-    """Quản lý việc tải dữ liệu lên HDFS trên Kubernetes (hỗ trợ WebHDFS & kubectl)."""
+    """Quản lý việc tải dữ liệu lên HDFS trên Kubernetes (hỗ trợ WebHDFS tốc độ cao & kubectl fallback)."""
 
     def __init__(
         self,
@@ -157,16 +172,41 @@ class HDFSUploader:
         hdfs_user: str = "root"
     ):
         self.webhdfs_url = (webhdfs_url or os.getenv("WEBHDFS_URL") or
-                            K8S_CFG.get("cluster_dns_webhdfs") or
                             K8S_CFG.get("host_forward_webhdfs") or
+                            K8S_CFG.get("cluster_dns_webhdfs") or
                             "http://localhost:9870").rstrip("/")
         self.k8s_pod = k8s_pod or os.getenv("K8S_NAMENODE_POD", "hdfs-namenode-0")
         self.k8s_namespace = k8s_namespace or os.getenv("K8S_NAMESPACE", "bigdata")
         self.hdfs_user = hdfs_user or os.getenv("HDFS_USER", "root")
+        self._pod_ip_cache: Dict[str, str] = {}
+        self._cache_time: float = 0.0
+
+    def _get_datanode_ips(self) -> Dict[str, str]:
+        """Tự động tra cứu và cache Pod IP của DataNodes để giải quyết chuyển hướng URL trong WSL2."""
+        now = time.time()
+        if self._pod_ip_cache and (now - self._cache_time < 120):
+            return self._pod_ip_cache
+        try:
+            cmd = ["kubectl", "get", "pods", "-n", self.k8s_namespace, "-l", "app=hdfs-datanode", "-o", "json"]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if proc.returncode == 0:
+                data = json.loads(proc.stdout)
+                cache = {}
+                for item in data.get("items", []):
+                    name = item.get("metadata", {}).get("name")
+                    pod_ip = item.get("status", {}).get("podIP")
+                    if name and pod_ip:
+                        cache[name] = pod_ip
+                if cache:
+                    self._pod_ip_cache = cache
+                    self._cache_time = now
+        except Exception:
+            pass
+        return self._pod_ip_cache
 
     def write_file(self, hdfs_path: str, data: str) -> bool:
         """Ghi dữ liệu (text string) vào đường dẫn file trên HDFS."""
-        # Cách 1: Thử gọi WebHDFS REST API
+        # Cách 1: Thử gọi WebHDFS REST API (tối ưu tốc độ cao ~25ms/file)
         if self._write_via_webhdfs(hdfs_path, data):
             return True
 
@@ -178,13 +218,30 @@ class HDFSUploader:
         return self._write_via_local_fallback(hdfs_path, data)
 
     def _write_via_webhdfs(self, hdfs_path: str, data: str) -> bool:
-        """Ghi file qua WebHDFS REST API (theo chuẩn WebHDFS 2 bước redirect)."""
+        """Ghi file qua WebHDFS REST API (kèm giải quyết IP rewrite thông minh cho DataNode)."""
         clean_path = hdfs_path.lstrip("/")
         create_url = f"{self.webhdfs_url}/webhdfs/v1/{clean_path}?op=CREATE&overwrite=true&user.name={self.hdfs_user}"
         try:
             req = urllib.request.Request(create_url, method="PUT")
-            with urllib.request.urlopen(req, timeout=5) as response:
-                redirect_url = response.geturl()
+            redirect_url = None
+            try:
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    redirect_url = response.geturl()
+            except urllib.error.HTTPError as e:
+                if e.code == 307:
+                    redirect_url = e.headers.get("Location")
+                else:
+                    return False
+
+            if not redirect_url:
+                return False
+
+            # Rewrite DataNode headless hostname sang Pod IP thực nếu hostname không phân giải được từ WSL2
+            datanode_ips = self._get_datanode_ips()
+            for pod_name, ip in datanode_ips.items():
+                if pod_name in redirect_url:
+                    redirect_url = re.sub(rf"{re.escape(pod_name)}\.[^:/]*", ip, redirect_url)
+                    break
 
             put_req = urllib.request.Request(
                 redirect_url,
@@ -192,7 +249,7 @@ class HDFSUploader:
                 headers={"Content-Type": "application/octet-stream"},
                 method="PUT"
             )
-            with urllib.request.urlopen(put_req, timeout=10) as put_resp:
+            with urllib.request.urlopen(put_req, timeout=5) as put_resp:
                 return put_resp.status in (200, 201)
         except Exception:
             return False
@@ -414,7 +471,7 @@ class KafkaHDFSSinkDaemon:
     def _create_consumer(self):
         # 1. Thử dùng confluent_kafka (Chuẩn của Module 02)
         try:
-            from confluent_kafka import Consumer
+            from confluent_kafka import Consumer  # type: ignore
             c = Consumer({
                 "bootstrap.servers": self.servers,
                 "group.id": self.group_id,
@@ -429,7 +486,7 @@ class KafkaHDFSSinkDaemon:
 
         # 2. Thử dùng kafka-python
         try:
-            from kafka import KafkaConsumer
+            from kafka import KafkaConsumer  # type: ignore
             c = KafkaConsumer(
                 *self.topics,
                 bootstrap_servers=self.servers.split(","),

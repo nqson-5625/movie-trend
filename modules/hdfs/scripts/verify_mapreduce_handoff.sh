@@ -4,7 +4,8 @@
 # Môi trường: Kubernetes (k3s)
 # Người thực hiện: Giang (Module 03) -> Bàn giao cho Đỗ Sơn (Module 04)
 # ==============================================================================
-set -euo pipefail
+set -e
+set -o pipefail 2>/dev/null || true
 
 # Tự động nạp .env nếu tồn tại
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +33,7 @@ echo "1. Kiểm tra Canonical Movie Reference (/movies/ref/current/):"
 if hdfs dfs -test -e /movies/ref/current/movie_reference.tsv; then
     echo "  [OK] Đã có /movies/ref/current/movie_reference.tsv"
     echo "  Xem trước 3 dòng đầu:"
-    hdfs dfs -cat /movies/ref/current/movie_reference.tsv | head -n 3
+    hdfs dfs -cat /movies/ref/current/movie_reference.tsv 2>/dev/null | head -n 3 || true
 else
     echo "  [LƯU Ý] Chưa có file reference! Cần chạy make -C modules/hdfs publish-ref trước."
 fi
@@ -40,7 +41,10 @@ fi
 echo -e "\n2. Kiểm tra Vùng Dữ liệu Thô (Raw Ratings):"
 if hdfs dfs -test -e /raw/ratings; then
     echo "  [OK] Thư mục /raw/ratings tồn tại."
-    hdfs dfs -ls /raw/ratings || true
+    total_partitions=$(hdfs dfs -ls /raw/ratings | wc -l)
+    echo "  Tổng số phân vùng ngày hiện có: ${total_partitions}"
+    echo "  Mẫu 3 phân vùng ngày đầu tiên:"
+    hdfs dfs -ls /raw/ratings | head -n 4 | tail -n 3
 else
     echo "  [LƯU Ý] Thư mục /raw/ratings chưa được tạo."
 fi

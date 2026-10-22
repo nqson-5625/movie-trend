@@ -83,6 +83,8 @@ spec:
               value: "/opt/hadoop"
             - name: HADOOP_NAMENODE_OPTS
               value: "-Xms512m -Xmx768m -XX:+UseG1GC"
+            - name: HADOOP_CLIENT_OPTS
+              value: "-Xms64m -Xmx128m"
           ports:
             - containerPort: 9000
               name: rpc
@@ -94,7 +96,7 @@ spec:
               memory: "512Mi"
             limits:
               cpu: "1000m"
-              memory: "1024Mi"
+              memory: "1280Mi"
           livenessProbe:
             tcpSocket:
               port: 9000
