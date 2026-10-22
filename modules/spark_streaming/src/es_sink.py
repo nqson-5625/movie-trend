@@ -60,6 +60,38 @@ def bulk_upsert_elasticsearch(
         return 0
 
 
+def merge_window_stats(
+    state_store: Dict[str, Dict[str, Any]],
+    batch_records: Iterable[Dict[str, Any]],
+    id_field: str = "doc_id",
+) -> List[Dict[str, Any]]:
+    """
+    Cộng dồn (accumulate) số liệu của micro-batch mới vào trạng thái lũy kế của cửa sổ (10m / 1h)
+    theo khóa định danh doc_id (movieId|window_start|window_size hoặc genre|window_start|window_size).
+    Trả về danh sách các document đã được cập nhật lũy kế trong batch này để upsert vào Elasticsearch.
+    """
+    updated_docs: List[Dict[str, Any]] = []
+    for rec in batch_records:
+        doc = dict(rec)
+        doc_id = str(doc[id_field])
+        if doc_id not in state_store:
+            state_store[doc_id] = doc
+        else:
+            prev = state_store[doc_id]
+            new_inter_cnt = int(prev["interaction_count"]) + int(doc["interaction_count"])
+            new_rating_cnt = int(prev["rating_count"]) + int(doc["rating_count"])
+            new_rating_sum = round(float(prev["rating_sum"]) + float(doc["rating_sum"]), 4)
+            new_avg_rating = round(new_rating_sum / new_rating_cnt, 4) if new_rating_cnt > 0 else 0.0
+
+            prev["interaction_count"] = new_inter_cnt
+            prev["rating_count"] = new_rating_cnt
+            prev["rating_sum"] = new_rating_sum
+            prev["avg_rating"] = new_avg_rating
+            prev["updated_at"] = doc["updated_at"]
+        updated_docs.append(dict(state_store[doc_id]))
+    return updated_docs
+
+
 def write_jsonl_output(
     output_file: Path,
     records: Iterable[Dict[str, Any]],

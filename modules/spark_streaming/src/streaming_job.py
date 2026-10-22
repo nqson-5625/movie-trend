@@ -20,10 +20,12 @@ for p in (str(PROJECT_ROOT), str(CURRENT_DIR)):
         sys.path.insert(0, p)
 
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 
 try:
     from .es_sink import (
         bulk_upsert_elasticsearch,
+        merge_window_stats,
         write_jsonl_output,
     )
     from .transforms import (
@@ -36,6 +38,7 @@ try:
 except ImportError:
     from es_sink import (  # type: ignore[no-redef, import-not-found]
         bulk_upsert_elasticsearch,
+        merge_window_stats,
         write_jsonl_output,
     )
     from transforms import (  # type: ignore[no-redef, import-not-found]
@@ -157,8 +160,12 @@ def run_kafka_streaming_mode(
     logger.info(f"Nạp canonical reference từ: {ref_path}")
     ref_df = load_canonical_reference(spark, ref_path).cache()
 
-    # Lưu trạng thái snapshot mới nhất của từng tmdbId xuyên qua các micro-batches
+    # Bộ nhớ trạng thái lũy kế xuyên qua các micro-batches (15s/30s)
+    seen_movie_event_ids: set[str] = set()
+    movie_window_state: Dict[str, Dict[str, Any]] = {}
+    genre_window_state: Dict[str, Dict[str, Any]] = {}
     tmdb_prev_state: Dict[int, Dict[str, Any]] = {}
+    tmdb_doc_state: Dict[int, Dict[str, Any]] = {}
 
     # 1. Đọc stream movie-events từ Kafka
     kafka_movie_df = (
@@ -173,24 +180,36 @@ def run_kafka_streaming_mode(
         if batch_df.isEmpty():  # type: ignore[operator]
             return
         valid_df, quarantine_df = parse_and_validate_movie_events(batch_df)
-        m_rows_all = []
-        g_rows_all = []
-        miss_cnt = 0
-        for win_label in ("10m", "1h"):
-            m_stats = compute_movie_realtime_stats(valid_df, win_label)
-            g_stats, miss_w = compute_genre_realtime(valid_df, ref_df, win_label)
-            miss_cnt = miss_w
-            m_rows_all.extend(r.asDict() for r in m_stats.collect())
-            g_rows_all.extend(r.asDict() for r in g_stats.collect())
 
-        write_jsonl_output(output_dir / "movie_realtime_stats.jsonl", m_rows_all)
-        write_jsonl_output(output_dir / "genre_realtime.jsonl", g_rows_all)
-        bulk_upsert_elasticsearch(es_url, "movie_realtime_stats", m_rows_all)
-        bulk_upsert_elasticsearch(es_url, "genre_realtime", g_rows_all)
-        logger.info(
-            f"[Batch {batch_id}] Upserted {len(m_rows_all)} movie_realtime_stats (10m+1h), "
-            f"{len(g_rows_all)} genre_realtime (10m+1h, join_miss={miss_cnt})"
-        )
+        # Dedup xuyên các micro-batches theo event_id để không cộng trùng khi replay
+        if seen_movie_event_ids:
+            valid_df = valid_df.filter(~F.col("event_id").isin(list(seen_movie_event_ids)))
+
+        new_ids = [r["event_id"] for r in valid_df.select("event_id").collect()]
+        if new_ids:
+            seen_movie_event_ids.update(new_ids)
+            m_rows_batch = []
+            g_rows_batch = []
+            miss_cnt = 0
+            for win_label in ("10m", "1h"):
+                m_stats = compute_movie_realtime_stats(valid_df, win_label)
+                g_stats, miss_w = compute_genre_realtime(valid_df, ref_df, win_label)
+                miss_cnt = miss_w
+                m_rows_batch.extend(r.asDict() for r in m_stats.collect())
+                g_rows_batch.extend(r.asDict() for r in g_stats.collect())
+
+            # Cộng dồn (accumulate) vào trạng thái lũy kế của cửa sổ 10m & 1h theo doc_id
+            updated_movie_docs = merge_window_stats(movie_window_state, m_rows_batch)
+            updated_genre_docs = merge_window_stats(genre_window_state, g_rows_batch)
+
+            write_jsonl_output(output_dir / "movie_realtime_stats.jsonl", movie_window_state.values())
+            write_jsonl_output(output_dir / "genre_realtime.jsonl", genre_window_state.values())
+            bulk_upsert_elasticsearch(es_url, "movie_realtime_stats", updated_movie_docs)
+            bulk_upsert_elasticsearch(es_url, "genre_realtime", updated_genre_docs)
+            logger.info(
+                f"[Batch {batch_id}] Lũy kế {len(updated_movie_docs)} movie windows, "
+                f"{len(updated_genre_docs)} genre windows (tổng active={len(movie_window_state)}, join_miss={miss_cnt})"
+            )
 
         q_rows = [r.asDict() for r in quarantine_df.collect()]
         if q_rows:
@@ -238,10 +257,12 @@ def run_kafka_streaming_mode(
                 "event_time": row["event_time"],
                 "popularity": row["popularity"],
             }
+            tmdb_doc_state[tid] = dict(row)
             upserts.append(row)
 
-        write_jsonl_output(output_dir / "tmdb_realtime.jsonl", upserts)
-        bulk_upsert_elasticsearch(es_url, "tmdb_realtime", upserts)
+        if upserts:
+            write_jsonl_output(output_dir / "tmdb_realtime.jsonl", tmdb_doc_state.values())
+            bulk_upsert_elasticsearch(es_url, "tmdb_realtime", upserts)
         logger.info(f"[TMDB Batch {batch_id}] Upserted {len(upserts)} tmdb_realtime records")
 
     tmdb_query = (

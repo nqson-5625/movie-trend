@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 TEST_DATA_DIR = PROJECT_ROOT / "data" / "test_data"
 
+from ..src.es_sink import merge_window_stats
 from ..src.streaming_job import create_spark_session, run_sample_mode
 from ..src.transforms import (
     compute_genre_realtime,
@@ -198,3 +199,69 @@ def test_sample_mode_end_to_end(spark):
     assert (TEST_DATA_DIR / "movie_realtime_stats.jsonl").exists()
     assert (TEST_DATA_DIR / "genre_realtime.jsonl").exists()
     assert (TEST_DATA_DIR / "tmdb_realtime.jsonl").exists()
+
+
+def test_multi_batch_window_accumulation(spark):
+    """
+    Kiểm tra cộng dồn (accumulate) qua nhiều micro-batch 15s rơi vào cùng cửa sổ 1h:
+    - Batch 1: 2 tương tác cho movieId=22 (rating 4.0 và 5.0 -> sum=9.0, avg=4.5)
+    - Batch 2 (15s sau): 1 tương tác mới cho movieId=22 trong cùng cửa sổ 1h (rating 3.0)
+      -> Sau khi merge_window_stats, tổng lũy kế của cửa sổ 1h phải là:
+         interaction_count = 3, rating_count = 3, rating_sum = 12.0, avg_rating = 4.0 (KHÔNG bị ghi đè thành 1).
+    """
+    state_store = {}
+
+    batch1_events = [
+        json.dumps({
+            "schema_version": "1.0",
+            "event_id": "1" * 64,
+            "source": "movielens",
+            "userId": 10,
+            "movieId": 22,
+            "rating": 4.0,
+            "event_time": "1996-03-29T18:10:00Z",
+            "ingest_time": "2026-10-22T10:00:00Z",
+        }),
+        json.dumps({
+            "schema_version": "1.0",
+            "event_id": "2" * 64,
+            "source": "movielens",
+            "userId": 11,
+            "movieId": 22,
+            "rating": 5.0,
+            "event_time": "1996-03-29T18:20:00Z",
+            "ingest_time": "2026-10-22T10:00:05Z",
+        }),
+    ]
+    b1_df, _ = parse_and_validate_movie_events(spark.createDataFrame([(e,) for e in batch1_events], ["value"]))
+    b1_rows = [r.asDict() for r in compute_movie_realtime_stats(b1_df, "1h").collect()]
+    updated_b1 = merge_window_stats(state_store, b1_rows)
+    assert len(updated_b1) == 1
+    assert updated_b1[0]["interaction_count"] == 2
+    assert updated_b1[0]["rating_sum"] == 9.0
+    assert updated_b1[0]["avg_rating"] == 4.5
+
+    batch2_events = [
+        json.dumps({
+            "schema_version": "1.0",
+            "event_id": "3" * 64,
+            "source": "movielens",
+            "userId": 12,
+            "movieId": 22,
+            "rating": 3.0,
+            "event_time": "1996-03-29T18:45:00Z",
+            "ingest_time": "2026-10-22T10:00:20Z",
+        }),
+    ]
+    b2_df, _ = parse_and_validate_movie_events(spark.createDataFrame([(e,) for e in batch2_events], ["value"]))
+    b2_rows = [r.asDict() for r in compute_movie_realtime_stats(b2_df, "1h").collect()]
+    updated_b2 = merge_window_stats(state_store, b2_rows)
+
+    assert len(updated_b2) == 1
+    doc = updated_b2[0]
+    assert doc["doc_id"] == "22|1996-03-29T18:00:00Z|1h"
+    assert doc["interaction_count"] == 3
+    assert doc["rating_count"] == 3
+    assert doc["rating_sum"] == 12.0
+    assert doc["avg_rating"] == 4.0
+
