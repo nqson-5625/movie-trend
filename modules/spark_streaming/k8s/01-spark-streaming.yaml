@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-speed-streaming
+  namespace: bigdata
+  labels:
+    app: spark-speed-streaming
+    module: module-05
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-speed-streaming
+  template:
+    metadata:
+      labels:
+        app: spark-speed-streaming
+    spec:
+      containers:
+        - name: spark-streaming
+          image: apache/spark-py:v3.5.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/opt/spark/bin/spark-submit"
+            - "--master"
+            - "local[2]"
+            - "--driver-memory"
+            - "768m"
+            - "--packages"
+            - "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
+            - "/workspace/modules/spark_streaming/src/streaming_job.py"
+            - "--mode"
+            - "kafka"
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-svc.bigdata.svc.cluster.local:9092"
+            - name: MOVIE_REFERENCE_PATH
+              value: "hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/movies/ref/current/movie_reference.tsv"
+            - name: SPARK_CHECKPOINT_ROOT
+              value: "hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/checkpoint/spark"
+            - name: ES_HTTP_URL
+              value: "http://elasticsearch-svc.bigdata.svc.cluster.local:9200"
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "768Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1152Mi"
