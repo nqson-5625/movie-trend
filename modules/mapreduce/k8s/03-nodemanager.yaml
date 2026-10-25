@@ -1,0 +1,80 @@
+# YARN NodeManager (2 pod): chạy các container map/reduce/ApplicationMaster.
+# 2 replica để giả lập môi trường phân tán và thử chịu lỗi (yêu cầu của môn học).
+#
+# Headless Service cho mỗi pod một tên DNS cố định, ví dụ
+#   yarn-nodemanager-0.yarn-nodemanager-headless.bigdata.svc.cluster.local
+# vì reducer lấy output của mapper (shuffle) bằng tên máy của NodeManager.
+apiVersion: v1
+kind: Service
+metadata:
+  name: yarn-nodemanager-headless
+  namespace: bigdata
+  labels:
+    app: yarn-nodemanager
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: yarn-nodemanager
+  ports:
+    - { name: web, port: 8042 }
+    - { name: shuffle, port: 13562 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: yarn-nodemanager
+  namespace: bigdata
+  labels:
+    app: yarn-nodemanager
+    app.kubernetes.io/part-of: mapreduce
+spec:
+  serviceName: yarn-nodemanager-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: yarn-nodemanager
+  template:
+    metadata:
+      labels:
+        app: yarn-nodemanager
+    spec:
+      containers:
+        - name: nodemanager
+          image: apache/hadoop:3.3.6
+          command: ["yarn", "nodemanager"]
+          env:
+            - { name: HADOOP_HOME, value: /opt/hadoop }
+            - { name: YARN_NODEMANAGER_OPTS, value: "-Xms96m -Xmx192m -XX:+UseG1GC" }
+          ports:
+            - { containerPort: 8042, name: web }
+            - { containerPort: 13562, name: shuffle }
+          resources:
+            # Giới hạn pod = 768 MB cho container (yarn-site) + JVM NodeManager + tiến trình Python
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: 1000m, memory: 1152Mi }
+          readinessProbe:
+            tcpSocket: { port: 8042 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 8042 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          volumeMounts:
+            - { name: hdfs-config, mountPath: /opt/hadoop/etc/hadoop/core-site.xml, subPath: core-site.xml }
+            - { name: hdfs-config, mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml, subPath: hdfs-site.xml }
+            - { name: yarn-config, mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml, subPath: yarn-site.xml }
+            - { name: yarn-config, mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml, subPath: mapred-site.xml }
+            - { name: yarn-config, mountPath: /opt/hadoop/etc/hadoop/capacity-scheduler.xml, subPath: capacity-scheduler.xml }
+            # Thư mục làm việc của container (jar, file -files/-archives, output tạm của map)
+            - { name: nm-local, mountPath: /tmp/hadoop-hadoop }
+      volumes:
+        - name: hdfs-config
+          configMap: { name: hdfs-config }   # của Module 03, chỉ đọc
+        - name: yarn-config
+          configMap: { name: yarn-config }
+        - name: nm-local
+          emptyDir: {}

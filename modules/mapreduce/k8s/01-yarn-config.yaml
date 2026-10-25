@@ -1,0 +1,70 @@
+# Cấu hình YARN + MapReduce cho Module 04.
+# core-site.xml / hdfs-site.xml KHÔNG nằm ở đây: các pod YARN gắn trực tiếp từ ConfigMap `hdfs-config`
+# của Module 03 (Giang) để luôn dùng chung một cấu hình HDFS.
+#
+# Ngân sách RAM (máy dev 8 GB): mỗi NodeManager cho phép 768 MB container.
+#   ApplicationMaster 384 MB + mỗi map/reduce task 256 MB.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yarn-config
+  namespace: bigdata
+  labels:
+    app.kubernetes.io/part-of: mapreduce
+data:
+  yarn-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <configuration>
+      <!-- ResourceManager: client và NodeManager kết nối qua Service ổn định -->
+      <property><name>yarn.resourcemanager.hostname</name><value>yarn-resourcemanager-svc.bigdata.svc.cluster.local</value></property>
+      <property><name>yarn.resourcemanager.bind-host</name><value>0.0.0.0</value></property>
+      <property><name>yarn.nodemanager.bind-host</name><value>0.0.0.0</value></property>
+
+      <!-- Shuffle: reducer lấy output của mapper qua dịch vụ shuffle của NodeManager -->
+      <property><name>yarn.nodemanager.aux-services</name><value>mapreduce_shuffle</value></property>
+      <property><name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name><value>org.apache.hadoop.mapred.ShuffleHandler</value></property>
+
+      <!-- Tài nguyên mỗi NodeManager cho container -->
+      <property><name>yarn.nodemanager.resource.memory-mb</name><value>768</value></property>
+      <property><name>yarn.nodemanager.resource.cpu-vcores</name><value>2</value></property>
+      <property><name>yarn.scheduler.minimum-allocation-mb</name><value>128</value></property>
+      <property><name>yarn.scheduler.maximum-allocation-mb</name><value>768</value></property>
+      <!-- JVM luôn xin nhiều bộ nhớ ảo; chỉ kiểm tra bộ nhớ thật để không kill container oan -->
+      <property><name>yarn.nodemanager.vmem-check-enabled</name><value>false</value></property>
+
+      <!-- Lưu log của container lên HDFS để xem lại bằng `yarn logs` sau khi job xong -->
+      <property><name>yarn.log-aggregation-enable</name><value>true</value></property>
+      <property><name>yarn.nodemanager.remote-app-log-dir</name><value>/tmp/yarn-logs</value></property>
+      <property><name>yarn.log-aggregation.retain-seconds</name><value>604800</value></property>
+    </configuration>
+
+  mapred-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <configuration>
+      <property><name>mapreduce.framework.name</name><value>yarn</value></property>
+      <!-- Hadoop 3 cần biết vị trí thư viện MapReduce trong container -->
+      <property><name>yarn.app.mapreduce.am.env</name><value>HADOOP_MAPRED_HOME=/opt/hadoop</value></property>
+      <property><name>mapreduce.map.env</name><value>HADOOP_MAPRED_HOME=/opt/hadoop</value></property>
+      <property><name>mapreduce.reduce.env</name><value>HADOOP_MAPRED_HOME=/opt/hadoop</value></property>
+
+      <!-- Bộ nhớ: container (MB) và heap Java (~75% container, phần còn lại cho tiến trình Python) -->
+      <property><name>yarn.app.mapreduce.am.resource.mb</name><value>384</value></property>
+      <property><name>yarn.app.mapreduce.am.command-opts</name><value>-Xmx288m</value></property>
+      <property><name>mapreduce.map.memory.mb</name><value>256</value></property>
+      <property><name>mapreduce.map.java.opts</name><value>-Xmx160m</value></property>
+      <property><name>mapreduce.reduce.memory.mb</name><value>256</value></property>
+      <property><name>mapreduce.reduce.java.opts</name><value>-Xmx160m</value></property>
+      <property><name>mapreduce.task.io.sort.mb</name><value>48</value></property>
+    </configuration>
+
+  capacity-scheduler.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <configuration>
+      <!-- Mặc định 0.1: ApplicationMaster chỉ được 10% cụm (~150 MB < 384 MB) => job treo mãi. -->
+      <property><name>yarn.scheduler.capacity.maximum-am-resource-percent</name><value>0.5</value></property>
+      <property><name>yarn.scheduler.capacity.root.queues</name><value>default</value></property>
+      <property><name>yarn.scheduler.capacity.root.default.capacity</name><value>100</value></property>
+      <property><name>yarn.scheduler.capacity.root.default.maximum-capacity</name><value>100</value></property>
+      <property><name>yarn.scheduler.capacity.root.default.state</name><value>RUNNING</value></property>
+      <property><name>yarn.scheduler.capacity.root.default.user-limit-factor</name><value>1</value></property>
+    </configuration>
