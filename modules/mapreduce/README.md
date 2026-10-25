@@ -53,6 +53,7 @@ make -C modules/mapreduce yarn-up                    # bật YARN: 1 ResourceMan
 make -C modules/mapreduce python-archive             # 1 lần: đưa Python 3 portable lên HDFS /apps/python/
 make -C modules/mapreduce batch CUTOFF=2018-10-01T00:00:00Z            # chạy 3 job, cùng một run_id
 make -C modules/mapreduce batch CUTOFF=... JOBS="movie_stats"          # chỉ chạy một job
+CUTOFF=... BATCH_ROOT=/tmp/m4-experiments bash modules/mapreduce/scripts/run_batch.sh   # chạy thử, không ghi /batch
 make -C modules/mapreduce yarn-down                  # tắt YARN để trả RAM (giữ cấu hình)
 ```
 
@@ -101,5 +102,5 @@ modules/mapreduce/
 | Job 2 `movie_daily_stats` | Xong: 99.538 dòng (ngày, phim) |
 | Job 3 `genre_daily_stats` | Xong: 32.894 dòng (ngày, thể loại), có `UNKNOWN` |
 | Script chạy batch + manifest (`make batch`) | Xong: run `20261024T104145Z`, cả 3 bảng khớp pandas 100% |
-| Thử phân tán / chịu lỗi | Chưa làm |
+| Thử phân tán / chịu lỗi | Xong (25/10): 1 vs 2 NodeManager; giết NodeManager và tắt DataNode giữa job ⇒ job vẫn xong, output giống hệt run chuẩn |
 | Chốt định dạng output với Module 06 | Chưa chốt |

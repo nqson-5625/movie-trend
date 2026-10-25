@@ -37,7 +37,7 @@ def parse_counters(log_text):
 
 def main():
     p = argparse.ArgumentParser()
-    for name in ("log-dir", "run-id", "cutoff", "generated-at", "input", "reference", "ref-version", "python-archive"):
+    for name in ("log-dir", "run-id", "cutoff", "generated-at", "input", "reference", "ref-version", "python-archive", "batch-root"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--jobs", nargs="+", required=True)
     a = p.parse_args()
@@ -68,7 +68,7 @@ def main():
             print(f"[WARN] {job}: {invalid} bản ghi sai contract bị loại (xem log task)", file=sys.stderr)
         manifest["jobs"][job] = {
             "hadoop_job_id": job_id,
-            "output": f"/batch/{job}/run_id={a.run_id}",
+            "output": f"{a.batch_root}/{job}/run_id={a.run_id}",
             "columns": COLUMNS[job] + TAIL,
             "counters": {"framework": framework, "data_quality": quality},
         }
