@@ -7,7 +7,7 @@ PYTEST_ARGS ?= -q
 NS := bigdata
 export KUBECONFIG ?= $(HOME)/.kube/config
 
-.PHONY: help test yarn-up yarn-down yarn-status python-archive batch
+.PHONY: help test yarn-up yarn-down yarn-status python-archive batch download
 
 help:
 	@printf '%s\n' \
@@ -19,7 +19,8 @@ help:
 	  '  yarn-down       Tắt YARN (scale về 0) để trả RAM, giữ cấu hình' \
 	  '  yarn-status     Trạng thái pod và NodeManager' \
 	  '  python-archive  Đưa Python 3 portable lên HDFS /apps/python (chạy 1 lần)' \
-	  '  batch           Chạy 3 job trên YARN: CUTOFF=2018-10-01T00:00:00Z [RUN_ID=...] [JOBS="movie_stats ..."]'
+	  '  batch           Chạy 3 job trên YARN: CUTOFF=2018-10-01T00:00:00Z [RUN_ID=...] [JOBS="movie_stats ..."]' \
+	  '  download        Tải run mới nhất về data/local/mapreduce/export/ [BATCH_ROOT=/tmp/m4-demo] [RUN_ID=...]'
 
 test:
 	cd "$(ROOT)" && "$(PYTHON)" -m pytest modules/mapreduce/tests $(PYTEST_ARGS)
@@ -41,3 +42,6 @@ python-archive:
 
 batch:
 	CUTOFF="$(CUTOFF)" RUN_ID="$(RUN_ID)" JOBS="$(JOBS)" bash "$(ROOT)/modules/mapreduce/scripts/run_batch.sh"
+
+download:
+	RUN_ID="$(RUN_ID)" BATCH_ROOT="$(BATCH_ROOT)" bash "$(ROOT)/modules/mapreduce/scripts/download_batch.sh"

@@ -44,6 +44,8 @@ Ghi vào `/batch/<bảng>/run_id=<run_id>/`:
 
 ## Cách chạy
 
+Tóm tắt lệnh cho người đã quen; chạy lần đầu hoặc demo cho nhóm thì làm theo [Demo từng bước](#demo-từng-bước).
+
 Điều kiện: k3s + HDFS của Module 03 đang chạy (`bash modules/hdfs/run.sh start`) và đã có dữ liệu trong `/raw/ratings`.
 Khi chạy batch nên tắt Kafka để đủ RAM (YARN cần thêm ~1 GB khi rảnh, tối đa ~2,6 GB khi chạy job).
 
@@ -54,6 +56,7 @@ make -C modules/mapreduce python-archive             # 1 lần: đưa Python 3 p
 make -C modules/mapreduce batch CUTOFF=2018-10-01T00:00:00Z            # chạy 3 job, cùng một run_id
 make -C modules/mapreduce batch CUTOFF=... JOBS="movie_stats"          # chỉ chạy một job
 CUTOFF=... BATCH_ROOT=/tmp/m4-experiments bash modules/mapreduce/scripts/run_batch.sh   # chạy thử, không ghi /batch
+make -C modules/mapreduce download                   # tải run mới nhất trong /batch về data/local/mapreduce/export/ (có header)
 make -C modules/mapreduce yarn-down                  # tắt YARN để trả RAM (giữ cấu hình)
 ```
 
@@ -65,6 +68,130 @@ Mỗi lần chạy `batch`:
 
 Log của Hadoop client nằm ở `data/local/mapreduce/run_id=<run_id>/` (gitignore). Log của từng container:
 `kubectl exec -n bigdata yarn-resourcemanager-0 -c resourcemanager -- yarn logs -applicationId <application_id>`.
+
+## Demo từng bước
+
+Chạy mọi lệnh từ thư mục gốc repo (`~/movie-trend`). Ghi chú trong ngoặc:
+
+- **(1 lần)**: chỉ chạy lần đầu trên mỗi máy, các lần sau bỏ qua.
+- **(mỗi lần)**: chạy mỗi lần demo / test.
+- **(tuỳ chọn)**: không bắt buộc.
+
+**Điều kiện trước:** HDFS đã có dữ liệu `/raw/ratings` và reference `/movies/ref/current/`
+(làm theo [HUONG_DAN_CHAY_MODULE_1_2_3.md](../hdfs/docs/HUONG_DAN_CHAY_MODULE_1_2_3.md) của Module 03).
+
+### B1. Test offline (mỗi lần, không cần bật cụm, ~5 giây)
+
+- Chạy test mapper → sort → reducer, đối chiếu với pandas:
+  - `make -C modules/mapreduce test`
+- Kỳ vọng: `5 passed`.
+
+### B2. Cấp quyền dùng `kubectl` (1 lần)
+
+- k3s mặc định chỉ root đọc được file cấu hình, nên chép một bản cho user:
+  - `mkdir -p ~/.kube`
+  - `sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config`
+  - `sudo chown "$USER" ~/.kube/config`
+  - `echo 'export KUBECONFIG=$HOME/.kube/config' >> ~/.bashrc`
+  - `source ~/.bashrc`
+- Kiểm tra:
+  - `kubectl get nodes`
+  - Kỳ vọng: 1 node `Ready`, không báo `permission denied`.
+
+### B3. Bật k3s và HDFS (mỗi lần)
+
+- Bật k3s:
+  - `sudo systemctl start k3s`
+- Bật HDFS, chọn **một** trong hai cách:
+  - Máy chưa dựng HDFS (1 lần): `bash modules/hdfs/run.sh`
+  - Máy đã dựng HDFS rồi (mỗi lần):
+    - `kubectl scale statefulset/hdfs-namenode -n bigdata --replicas=1`
+    - `kubectl scale statefulset/hdfs-datanode -n bigdata --replicas=2`
+- Hạ heap DataNode để tránh `OOMKilled` (mỗi lần chạy `run.sh`, vì script đặt lại heap 384 MB):
+  - `kubectl set env statefulset/hdfs-datanode -n bigdata HADOOP_DATANODE_OPTS="-Xms128m -Xmx256m -XX:+UseG1GC"`
+  - `kubectl rollout status statefulset/hdfs-datanode -n bigdata`
+- Kiểm tra:
+  - `kubectl get pods -n bigdata`
+  - Kỳ vọng: `hdfs-namenode-0`, `hdfs-datanode-0`, `hdfs-datanode-1` đều `1/1 Running`.
+- Tắt sink và port-forward do `run.sh` bật, để đủ RAM cho YARN (tuỳ chọn, pod HDFS vẫn chạy):
+  - `bash modules/hdfs/run.sh stop`
+
+### B4. Bật YARN (mỗi lần)
+
+- Bật 1 ResourceManager + 2 NodeManager (~1–2 phút):
+  - `make -C modules/mapreduce yarn-up`
+- Kiểm tra:
+  - `make -C modules/mapreduce yarn-status`
+  - Kỳ vọng: `Total Nodes:2`, cả 2 dòng `RUNNING` (mới thấy 1 node thì chờ 30 giây rồi chạy lại).
+- Đưa Python 3 lên HDFS (1 lần; đã có thì script tự bỏ qua):
+  - `make -C modules/mapreduce python-archive`
+
+### B5. Chạy 3 job MapReduce (mỗi lần, ~5 phút)
+
+- Chạy vào thư mục thử `/tmp/m4-demo` để không tạo thêm run chính thức trong `/batch`:
+  - `CUTOFF=2018-10-01T00:00:00Z BATCH_ROOT=/tmp/m4-demo bash modules/mapreduce/scripts/run_batch.sh`
+- Kỳ vọng: dòng đầu in `run_id=...`, dòng cuối `[OK] Đã publish /tmp/m4-demo/_meta/run_id=.../manifest.json`.
+- Xem tiến độ trên trình duyệt (tuỳ chọn):
+  - Mở terminal khác: `kubectl port-forward -n bigdata svc/yarn-resourcemanager-svc 8088:8088`
+  - Vào http://localhost:8088
+
+### B6. Xem kết quả (mỗi lần)
+
+- Đặt biến tắt cho lệnh HDFS:
+  - `NN="kubectl exec -n bigdata hdfs-namenode-0 -c namenode --"`
+- Liệt kê file output (`part-00000`, `part-00001`, `_SUCCESS`, `manifest.json`):
+  - `$NN hdfs dfs -ls -R /tmp/m4-demo`
+- Xem vài dòng đầu (TSV không header, thứ tự cột ở mục [Output](#output)):
+  - `$NN hdfs dfs -cat '/tmp/m4-demo/movie_stats/run_id=*/part-*' | head`
+  - `$NN hdfs dfs -cat '/tmp/m4-demo/movie_daily_stats/run_id=*/part-*' | head`
+  - `$NN hdfs dfs -cat '/tmp/m4-demo/genre_daily_stats/run_id=*/part-*' | head`
+- Đếm số dòng:
+  - `$NN hdfs dfs -cat '/tmp/m4-demo/movie_stats/run_id=*/part-*' | wc -l`
+  - Kỳ vọng: `9724`.
+- Xem manifest + counters:
+  - `$NN hdfs dfs -cat '/tmp/m4-demo/_meta/run_id=*/manifest.json'`
+- Kết quả kỳ vọng với dữ liệu hiện tại và `CUTOFF=2018-10-01T00:00:00Z`:
+
+  | Bảng | Số dòng | `duplicates_removed` |
+  | --- | --- | --- |
+  | `movie_stats` | 9.724 | 1.000 |
+  | `movie_daily_stats` | 99.538 | 1.000 |
+  | `genre_daily_stats` | 32.894 | 2.633 (một phim nhiều thể loại nên một bản trùng bị đếm ở nhiều nhóm) |
+
+- Xem run chính thức (tuỳ chọn): run `20261024T104145Z` (chạy lúc 2026-10-24 10:41:45 UTC) đã publish vào `/batch`,
+  là bản Module 06 sẽ đọc. Dùng các lệnh trên, thay `/tmp/m4-demo` bằng `/batch`, ví dụ:
+  - `$NN hdfs dfs -cat '/batch/movie_stats/run_id=20261024T104145Z/part-*' | head`
+
+### B7. Tải kết quả về máy (tuỳ chọn)
+
+- Tải kết quả vừa chạy ở B5 về máy (làm trước B8, vì B8 xoá `/tmp/m4-demo`):
+  - `make -C modules/mapreduce download BATCH_ROOT=/tmp/m4-demo`
+- Kỳ vọng: in `run_id` vừa tải và số dòng từng bảng; file nằm ở `data/local/mapreduce/export/run_id=<run_id>/`
+  (`movie_stats.tsv`, ..., `manifest.json`), có dòng header, mở được bằng VS Code / Excel.
+- Dùng lệnh này vì nút Download trên Web UI 9870 không dùng được từ Windows (NameNode chuyển hướng sang
+  địa chỉ nội bộ của DataNode trong k3s).
+
+### B8. Dọn dẹp và tắt (mỗi lần)
+
+- Xoá thư mục thử (tải về ở B7 trước nếu muốn giữ):
+  - `kubectl exec -n bigdata hdfs-namenode-0 -c namenode -- hdfs dfs -rm -r -skipTrash /tmp/m4-demo`
+- Tắt YARN:
+  - `make -C modules/mapreduce yarn-down`
+- Tắt HDFS (dữ liệu vẫn giữ trên ổ đĩa):
+  - `bash modules/hdfs/run.sh stop`
+  - `kubectl scale statefulset/hdfs-datanode statefulset/hdfs-namenode -n bigdata --replicas=0`
+
+### Lỗi hay gặp
+
+| Hiện tượng | Cách xử lý |
+| --- | --- |
+| `kubectl`: permission denied với `/etc/rancher/k3s/k3s.yaml` | `export KUBECONFIG=$HOME/.kube/config` (hoặc `sudo chmod 644 /etc/rancher/k3s/k3s.yaml`) |
+| Pod `hdfs-datanode-*` bị `OOMKilled` / restart liên tục | heap 384 MB quá sát limit 512Mi; tạm hạ heap: `kubectl set env statefulset/hdfs-datanode -n bigdata HADOOP_DATANODE_OPTS="-Xms128m -Xmx256m -XX:+UseG1GC"` |
+| `YARN chưa chạy` | `make -C modules/mapreduce yarn-up` |
+| `Thiếu /apps/python/...` | `make -C modules/mapreduce python-archive` |
+| `run_id=... đã được publish` | Mỗi `run_id` chỉ publish một lần; chạy lại sau 1 giây hoặc đặt `RUN_ID=` khác |
+| Job treo ở `ACCEPTED`, máy chậm | Thiếu RAM: tắt Kafka/sink (`make -C modules/kafka_ingestion kafka-stop`, `bash modules/hdfs/run.sh stop`) |
+| Job lỗi | Xem `data/local/mapreduce/run_id=<id>/<job>.log`, rồi `yarn logs -applicationId <id>` như trên |
 
 ## Triển khai
 
@@ -80,7 +207,7 @@ modules/mapreduce/
 ├── src/          mr_common.py + mapper/reducer của 3 job (Python 3, chỉ thư viện chuẩn)
 ├── tests/        test_jobs.py — trường hợp đặc biệt + toàn bộ dữ liệu thật, đối chiếu pandas
 ├── k8s/          01-yarn-config, 02-resourcemanager, 03-nodemanager
-├── scripts/      run_batch.sh, build_manifest.py, upload_python.sh
+├── scripts/      run_batch.sh, build_manifest.py, upload_python.sh, download_batch.sh
 └── Makefile
 ```
 

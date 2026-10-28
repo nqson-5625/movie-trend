@@ -1,7 +1,7 @@
 """Phần dùng chung cho mapper/reducer của Module 04 (Hadoop Streaming, chỉ thư viện chuẩn Python 3).
 
-Được gửi tới các NodeManager qua -files cùng mapper/reducer; mapper/reducer chạy trong cùng thư mục
-nên `import mr_common` hoạt động cả trên máy dev lẫn trên cụm.
+Được gửi tới các NodeManager qua -files cùng mapper/reducer. -files chỉ tạo symlink trong thư mục làm việc
+(file thật nằm ở thư mục cache riêng), nên job chạy với PYTHONPATH=. để `import mr_common` tìm thấy module.
 """
 import csv
 import json
