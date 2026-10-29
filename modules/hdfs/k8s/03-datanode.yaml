@@ -55,7 +55,7 @@ spec:
             - name: HADOOP_HOME
               value: "/opt/hadoop"
             - name: HADOOP_DATANODE_OPTS
-              value: "-Xms256m -Xmx384m -XX:+UseG1GC"
+              value: "-Xms128m -Xmx256m -XX:+UseG1GC"
           ports:
             - containerPort: 9864
               name: web

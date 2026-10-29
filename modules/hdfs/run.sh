@@ -276,7 +276,7 @@ case "${1:-start}" in
         printf "  * Thư mục Raw Events:   ${C_CYAN}/raw/ratings/dt=YYYY-MM-DD/${C_RESET}\n"
         printf "  * Thư mục Batch Output: ${C_CYAN}/batch/${C_RESET} (Quyền ghi 777 cho MapReduce)\n"
         printf "  * Thư mục File Logs:    ${C_CYAN}${LOG_DIR}/${C_RESET}\n"
-        printf "\nLệnh kiểm tra: ${C_YELLOW}./run.sh status${C_RESET} | Lệnh dừng: ${C_YELLOW}./run.sh stop${C_RESET}\n\n"
+        printf "\nLệnh kiểm tra: ${C_YELLOW}bash modules/hdfs/run.sh status${C_RESET} | Lệnh dừng: ${C_YELLOW}bash modules/hdfs/run.sh stop${C_RESET}\n\n"
         exit 0
         ;;
     status|ps)

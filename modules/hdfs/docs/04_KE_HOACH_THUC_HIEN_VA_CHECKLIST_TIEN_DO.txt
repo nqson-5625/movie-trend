@@ -67,7 +67,7 @@ GIAI ĐOẠN 7: TỔNG KẾT, ĐÓNG GÓI VÀ TÍCH HỢP TOÀN HỆ THỐNG
 [x] BƯỚC 1: KHỞI TẠO MÔI TRƯỜNG & HẠ TẦNG KUBERNETES
     [x] Cài đặt k3s trên Ubuntu VM.
     [x] Thiết kế manifests tại `modules/hdfs/k8s/` (00, 01, 02, 03, kustomization).
-    [x] Cấu hình JVM Heap tối ưu: NameNode (-Xmx768m), DataNode (-Xmx384m).
+    [x] Cấu hình JVM Heap tối ưu: NameNode (-Xmx768m), DataNode (-Xmx256m, hạ từ 384m để tránh OOMKilled khi chạy MapReduce).
     [x] Khởi chạy cụm bằng lệnh `make k8s-up`.
     [x] Xác nhận `make k8s-status` và `make k8s-report`:
         - 1 NameNode Pod Running.

@@ -23,7 +23,7 @@ Tài liệu kiến trúc chi tiết: docs/K8S_MIGRATION_GUIDE.md
   * Block size 32 MB, Replication factor 2.
 - Giới hạn RAM khắt khe:
   * NameNode: JVM Heap -Xms512m -Xmx768m (K8s Memory Limit 1024Mi).
-  * DataNode: Mỗi Pod JVM Heap -Xms256m -Xmx384m (K8s Memory Limit 512Mi).
+  * DataNode: Mỗi Pod JVM Heap -Xms128m -Xmx256m (K8s Memory Limit 512Mi, hạ từ 384m để tránh OOMKilled khi MapReduce chạy).
   * Tổng RAM cả cụm HDFS luôn <= 1.5 GB.
 
 --------------------------------------------------------------------------------

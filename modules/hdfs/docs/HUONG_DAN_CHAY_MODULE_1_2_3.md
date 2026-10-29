@@ -128,7 +128,17 @@ cd ~/movie-trend
 cp modules/data_source/.env.example modules/data_source/.env
 ```
 
-#### 1.2. Tải dữ liệu nguồn (hoặc copy dữ liệu có sẵn vào `data/raw/`)
+#### 1.2. Tải dữ liệu nguồn (hoặc tái sử dụng dữ liệu có sẵn trong `data/raw/`)
+> [!NOTE]
+> Các script tải của Module 01 tuân thủ nguyên tắc **bất biến (immutability)** — nếu dữ liệu thô đã tồn tại trong `data/raw/`, script sẽ **từ chối ghi đè** để tránh tải lại hoặc làm hỏng dữ liệu gốc.
+> Vì vậy, hãy dùng lệnh an toàn dưới đây (sẽ tự động bỏ qua nếu đã có dữ liệu):
+
+```bash
+# Tải an toàn (nếu đã có sẵn dữ liệu thì tự động kiểm tra và SKIP):
+make -C modules/data_source download
+```
+
+*(Hoặc nếu tải thủ công từng script khi chưa có thư mục `data/raw`):*
 ```bash
 # Tải MovieLens ml-latest-small:
 .venv/bin/python -m modules.data_source.src.download_movielens
@@ -152,7 +162,7 @@ cp modules/data_source/.env.example modules/data_source/.env
 .venv/bin/python -m modules.data_source.src.validate_reference
 
 # Trích xuất các fixtures mẫu (20 records mỗi loại) để phục vụ test:
-.venv/bin/python -m modules.data_source.src.build_fixtures --count 20
+.venv/bin/python -m modules.data_source.src.build_fixtures --count 20 --snapshot contracts/samples/tmdb-snapshots.sample.jsonl
 
 # Tạo manifest tổng kết phiên bản:
 .venv/bin/python -m modules.data_source.src.build_manifest
@@ -242,6 +252,13 @@ make -C modules/kafka_ingestion tmdb
 
 * Ingestion Sink Daemon (`kafka_hdfs_sink.py`) đang chạy ngầm sẽ tự động đọc thông điệp từ Kafka, kiểm tra hợp đồng schema, giải mã `event_time` và gom batch ghi thành các file `.jsonl` vào thư mục ngày tương ứng `/raw/ratings/dt=YYYY-MM-DD/`.
 
+> [!IMPORTANT]
+> **QUY TẮC VẬN HÀNH SỐNG CÒN: KHÔNG CHẠY LẠI PRODUCER KHI `/raw` ĐÃ CÓ DỮ LIỆU!**  
+> 1. **Cơ chế Sink:** Ingestion Sink Daemon hoạt động theo phương thức streaming append liên tục vào các file phân vùng ngày `/raw/ratings/dt=YYYY-MM-DD/`. Do đó, nếu kích hoạt lại Producer (`make producer`) trong khi `/raw` đã chứa dữ liệu, hệ thống sẽ tiếp tục append thêm các bản ghi vào các file này, gây phình to dung lượng và phát sinh thêm dữ liệu lặp lại.
+> 2. **Hiện trạng dữ liệu thực tế:** Trong tập dữ liệu `/raw/ratings` hiện tại ghi nhận có **1.000 dòng trùng `event_id`** (nguyên nhân do trong một đợt ghi trước đây, Sink Daemon bị nghẽn I/O dẫn đến thời gian xử lý vượt quá ngưỡng `max.poll.interval.ms` của Kafka Consumer; Kafka Coordinator ngắt kết nối và rebalance group, sau đó Sink kết nối lại và đọc lại 1 lô 1.000 sự kiện).
+> 3. **Tính toàn vẹn của kết quả Batch:** **Module 04 (MapReduce - Đỗ Sơn) đã triển khai logic loại trùng (deduplication theo `event_id`)**, vì vậy kết quả tính toán batch (`movie_stats`, `genre_daily_stats`, `movie_daily_stats`) hoàn toàn chính xác.
+> 4. **Khuyến nghị vận hành:** Tuyệt đối không chạy lại Producer khi `/raw` đã có dữ liệu. Nếu bắt buộc cần chạy lại toàn bộ pipeline để benchmark, phải dọn dẹp sạch HDFS trước (`bash modules/hdfs/run.sh stop --all` rồi khởi tạo lại).
+
 ---
 
 ## 5. KIỂM TRA DỮ LIỆU ĐẦU RA VÀ NGHIỆM THU
@@ -254,6 +271,10 @@ Mở trình duyệt bất kỳ trên máy tính:
   [http://localhost:9870/explorer.html#/movies/ref/current](http://localhost:9870/explorer.html#/movies/ref/current) $\rightarrow$ Thấy file `movie_reference.tsv` (1.11 MB).
 * **Đường dẫn xem các file sự kiện đánh giá phân vùng theo ngày:**  
   [http://localhost:9870/explorer.html#/raw/ratings](http://localhost:9870/explorer.html#/raw/ratings) $\rightarrow$ Thấy hàng trăm thư mục ngày dạng `dt=YYYY-MM-DD`.
+
+> [!TIP]
+> **Lưu ý khi xem nội dung file ("Preview" hoặc "Download") qua Web UI:**  
+> Hadoop WebHDFS sử dụng cơ chế **HTTP 307 Temporary Redirect** trỏ thẳng đến FQDN nội bộ của Pod DataNode (`http://hdfs-datanode-0...:9864/...`). Nếu trình duyệt trên máy Windows báo lỗi `NetworkError: Failed to execute 'send' on 'XMLHttpRequest'`, hãy xem chi tiết cách cấu hình file `hosts` tại [Mục 7.2 - Sự cố 5](#sự-cố-5-lỗi-networkerror-khi-bấm-preview-hoặc-download-file-trên-web-ui-9870), hoặc dùng lệnh CLI [Mục 5.2](#52-kiểm-tra-bằng-dòng-lệnh-hdfs-cli-từ-wsl) để đọc trực tiếp file.
 
 ### 5.2. Kiểm tra bằng dòng lệnh HDFS CLI (từ WSL)
 ```bash
@@ -280,11 +301,17 @@ bash modules/hdfs/scripts/verify_mapreduce_handoff.sh
 Hệ thống tích hợp sẵn bộ kiểm thử tự động toàn diện qua `pytest`:
 
 ```bash
-# Chạy toàn bộ 185+ unit tests của cả 3 modules:
+# 1. Chạy 180 unit & contract tests mặc định của cả 3 modules:
 .venv/bin/python -m pytest modules/data_source/tests modules/kafka_ingestion/tests modules/hdfs/tests -q
+
+# 2. (Khi Kafka broker đang chạy) Chạy 5 integration tests với Kafka thật:
+RUN_KAFKA_INTEGRATION=1 .venv/bin/python -m pytest modules/kafka_ingestion/tests/test_integration.py -q
 ```
 
-> **Kết quả kỳ vọng:** `185 passed, 5 skipped in ~3.0s` (100% tests cốt lõi đều đạt).
+> **Kết quả kỳ vọng:**  
+> • Lệnh 1: `180 passed, 5 skipped in ~2.7s` (5 tests integration tự động bỏ qua khi chưa bật cờ môi trường).  
+> • Lệnh 2: `5 passed in ~38s` (Kiểm thử replay producer và consumer thật qua Kafka KRaft).  
+> • **Tổng cộng: 185/185 tests ĐẠT 100%.**
 
 ---
 
@@ -324,12 +351,58 @@ bash modules/hdfs/run.sh stop --all
   ```
 
 #### Sự cố 3: Không mở được Web UI [http://localhost:9870](http://localhost:9870)
-* **Nguyên nhân:** Tiến trình Port-Forward bị ngắt.
+* **Nguyên nhân:** Tiến trình Port-Forward bị ngắt (thường do đóng cửa sổ terminal hoặc WSL2 vào trạng thái nghỉ / sleep).
 * **Cách khắc phục:**
-  Chạy lại lệnh port-forward nhắm trực tiếp vào pod NameNode:
+  Khởi động lại port-forward chạy ngầm tự phục hồi:
   ```bash
-  nohup kubectl port-forward --address 0.0.0.0 -n bigdata pod/hdfs-namenode-0 9870:9870 9000:9000 > /tmp/port_forward.log 2>&1 &
+  nohup bash -c 'while true; do kubectl port-forward --address 0.0.0.0 -n bigdata pod/hdfs-namenode-0 9870:9870 9000:9000 >> modules/hdfs/logs/port_forward.log 2>&1; sleep 2; done' >/dev/null 2>&1 &
+  ```
+  Hoặc chỉ cần gọi lại script điều phối:
+  ```bash
+  bash modules/hdfs/run.sh
   ```
 
 #### Sự cố 4: Thư mục `/batch/` trên Web UI không có file
 * **Giải thích:** Thư mục `/batch/` là nơi lưu kết quả tính toán của **Module 04 (Hadoop MapReduce)**. Module 03 đã tạo sẵn thư mục và cấp quyền `777`. Khi nào Module 04 chạy các Job MapReduce (`movie_stats`, `genre_daily_stats`), các file kết quả `part-r-*.csv` mới xuất hiện tại đây.
+
+#### Sự cố 5: Lỗi NetworkError khi bấm Preview hoặc Download file trên Web UI (9870)
+* **Hiện tượng:** Khi duyệt đến file (ví dụ `/raw/ratings/.../part-*.jsonl` hoặc `movie_reference.tsv`) và bấm **"Head the file (first 32KB)"** hoặc **"Download"**, trình duyệt báo lỗi:  
+  `Couldn't preview the file. NetworkError: Failed to execute 'send' on 'XMLHttpRequest': Failed to load 'http://hdfs-datanode-0.hdfs-datanode-headless.bigdata.svc.cluster.local:9864/webhdfs/v1/...'`
+* **Nguyên nhân:** NameNode WebHDFS phản hồi mã **HTTP 307 Temporary Redirect** trỏ về tên miền nội bộ của Pod DataNode (`hdfs-datanode-0.hdfs-datanode-headless.bigdata.svc.cluster.local:9864`). Trình duyệt Windows ở máy host không thể tự phân giải DNS nội bộ của cụm Kubernetes k3s.
+* **Cách khắc phục:**
+  * **Cách 1 (Khuyến nghị cho kiểm định đồ án & Data Pipeline):** Dùng lệnh HDFS CLI từ terminal WSL (không phụ thuộc DNS trình duyệt):
+    ```bash
+    # Đọc thử file phân vùng ratings:
+    kubectl exec -i -n bigdata hdfs-namenode-0 -c namenode -- hdfs dfs -cat /raw/ratings/dt=1996-04-12/part*.jsonl | head -n 5
+    
+    # Đọc thử file movie_reference:
+    kubectl exec -i -n bigdata hdfs-namenode-0 -c namenode -- hdfs dfs -cat /movies/ref/current/movie_reference.tsv | head -n 5
+    ```
+  * **Cách 2 (Nếu muốn xem Preview trực tiếp trên trình duyệt Windows):**
+    1. Mở Notepad bằng quyền Administrator, mở file `C:\Windows\System32\drivers\etc\hosts` và thêm dòng sau vào cuối file:
+       ```text
+       127.0.0.1 hdfs-datanode-0.hdfs-datanode-headless.bigdata.svc.cluster.local hdfs-datanode-1.hdfs-datanode-headless.bigdata.svc.cluster.local
+       ```
+    2. Chạy port-forward cổng 9864 của DataNode từ WSL:
+       ```bash
+       nohup bash -c 'while true; do kubectl port-forward --address 0.0.0.0 -n bigdata pod/hdfs-datanode-0 9864:9864 >> modules/hdfs/logs/port_forward_dn.log 2>&1; sleep 2; done' >/dev/null 2>&1 &
+       ```
+    3. Tải lại trang Web UI (F5) và bấm Preview bình thường.
+
+#### Sự cố 6: Pod DataNode bị OOMKilled (Exit Code 137) khi chạy MapReduce
+* **Hiện tượng:** Khi Module 04 chạy các MapReduce job (`movie_stats`, `genre_daily_stats`), các Pod `hdfs-datanode-0` hoặc `hdfs-datanode-1` bị khởi động lại đột ngột. Kiểm tra `kubectl describe pod hdfs-datanode-0 -n bigdata` thấy trạng thái `Last State: Terminated`, `Reason: OOMKilled`, `Exit Code: 137`.
+* **Nguyên nhân:** Trước đây heap size của DataNode được cấu hình `-Xms256m -Xmx384m`, trong khi K8s memory limit là `512Mi`. Khi MapReduce đọc/ghi đồng thời lượng lớn blocks dữ liệu, JVM cần thêm bộ nhớ ngoài heap (Native memory, Metaspace, socket buffers, thread stacks). Tổng bộ nhớ container vượt quá 512Mi nên Linux cgroup kích hoạt OOM Killer để hạ pod.
+* **Cách khắc phục triệt để:** Đã cập nhật trực tiếp trong manifest `modules/hdfs/k8s/03-datanode.yaml`:
+  ```yaml
+  - name: HADOOP_DATANODE_OPTS
+    value: "-Xms128m -Xmx256m -XX:+UseG1GC"
+  ```
+  Hạ heap tối đa xuống `256m` giúp dành ra khoảng `256Mi` vùng đệm an toàn cho các tác vụ I/O và JVM overhead, đảm bảo Pod hoạt động bền bỉ, không bao giờ bị OOMKilled khi chạy lại `./run.sh`.
+
+#### Sự cố 7: Xuất hiện dữ liệu trùng lặp trong `/raw/ratings` do Sink quá thời gian `max.poll.interval.ms`
+* **Hiện tượng:** Quét dữ liệu thấy có khoảng 1.000 dòng trùng lặp `event_id` trong `/raw/ratings/`.
+* **Nguyên nhân:** Trong một đợt ghi dữ liệu lớn lên HDFS, Ingestion Sink Daemon mất nhiều thời gian hơn ngưỡng `max.poll.interval.ms` (mặc định của Kafka Consumer là 300.000 ms = 5 phút) giữa hai lần gọi `poll()`. Kafka Coordinator coi Consumer bị treo, kích hoạt Rebalance và revoke partition. Khi Sink daemon kết nối lại, nó đọc lại từ committed offset trước đó, dẫn đến 1 lô 1.000 sự kiện bị ghi lặp lại vào HDFS.
+* **Biện pháp xử lý & Quy định vận hành:**
+  - **Downstream Deduplication:** Module 04 (MapReduce) đã được trang bị cơ chế loại trùng tự động (deduplication theo `event_id`), đảm bảo kết quả tổng hợp lô hoàn toàn chính xác.
+  - **Quy tắc vận hành bắt buộc:** **Tuyệt đối KHÔNG chạy lại Producer khi `/raw` đã có dữ liệu** để tránh sinh thêm dữ liệu trùng lặp.
+

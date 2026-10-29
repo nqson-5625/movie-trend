@@ -108,10 +108,15 @@ modules/hdfs/
 Toàn bộ hệ thống chạy chung trên 01 VM Ubuntu 8 GB RAM. Để đảm bảo Linux OOM Killer không tắt bất kỳ tiến trình nào, Module 03 áp dụng cấu hình tài nguyên nghiêm ngặt:
 
 - **HDFS NameNode (Pod `hdfs-namenode-0`):** JVM Heap `-Xms512m -Xmx768m` (K8s Memory Limit: 1024Mi).
-- **HDFS DataNodes (Pods `hdfs-datanode-0`, `hdfs-datanode-1`):** Mỗi Pod JVM Heap `-Xms256m -Xmx384m` (K8s Memory Limit: 512Mi).
+- **HDFS DataNodes (Pods `hdfs-datanode-0`, `hdfs-datanode-1`):** Mỗi Pod JVM Heap `-Xms128m -Xmx256m` (K8s Memory Limit: 512Mi), đảm bảo ~256Mi đệm cho bộ nhớ hệ thống/Metaspace, loại bỏ triệt để lỗi Pod bị OOMKilled khi chạy MapReduce.
 - **HDFS Block Size:** `32 MB` (thay vì 128 MB mặc định) giúp chia block nhanh và tiết kiệm bộ nhớ quản lý của NameNode.
 - **Replication Factor:** `2` (đảm bảo tính dự phòng trên 2 DataNodes mà không gây áp lực ổ đĩa).
-- **Tổng RAM tiêu thụ của cả cụm HDFS:** $\le 1.5\text{ GB RAM}$, dành lại hơn 6.5 GB RAM cho Kafka, Spark, Elasticsearch và OS.
+- **Tổng RAM tiêu thụ của cả cụm HDFS:** $\le 1.4\text{ GB RAM}$, dành lại hơn 6.6 GB RAM cho Kafka, Spark, Elasticsearch và OS.
+
+> [!IMPORTANT]
+> **Lưu ý dữ liệu thô `/raw` & Quy tắc vận hành:**  
+> - **Deduplication:** Trong `/raw/ratings` có 1.000 dòng trùng `event_id` do Sink từng vượt `max.poll.interval.ms` và re-poll lại một lô sự kiện. Module 04 (MapReduce - Đỗ Sơn) đã xử lý loại trùng nên kết quả Batch vẫn chính xác 100%.
+> - **Quy tắc bắt buộc:** **TUYỆT ĐỐI KHÔNG CHẠY LẠI PRODUCER KHI `/raw` ĐÃ CÓ DỮ LIỆU** để tránh append thêm các bản ghi trùng vào các phân vùng ngày.
 
 ---
 

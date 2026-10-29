@@ -72,8 +72,8 @@ flowchart TD
         end
 
         subgraph DN_WORKLOAD ["DataNode Workload (Replicas: 2)"]
-            POD_DN0["Pod: hdfs-datanode-0\nJVM Heap: 256M - 384M\nMem Limit: 512Mi"]
-            POD_DN1["Pod: hdfs-datanode-1\nJVM Heap: 256M - 384M\nMem Limit: 512Mi"]
+            POD_DN0["Pod: hdfs-datanode-0\nJVM Heap: 128M - 256M\nMem Limit: 512Mi"]
+            POD_DN1["Pod: hdfs-datanode-1\nJVM Heap: 128M - 256M\nMem Limit: 512Mi"]
             SVC_DN_HEADLESS["Headless Service\nhdfs-datanode-headless:None"]
             POD_DN0 --- PVC_DN0
             POD_DN1 --- PVC_DN1
@@ -111,8 +111,8 @@ Hạ tầng chạy trên **01 Ubuntu VM duy nhất với 8 GB RAM**. Vì vậy, 
 | Pod / Thành phần | CPU Request | CPU Limit | Memory Request | Memory Limit | JVM Heap Settings (`JAVA_OPTS`) |
 | :--- | :---: | :---: | :---: | :---: | :--- |
 | **`hdfs-namenode-0`** | `200m` | `1000m` | `512Mi` | `1024Mi` | `-Xms512m -Xmx768m -XX:+UseG1GC` |
-| **`hdfs-datanode-0`** | `100m` | `500m` | `256Mi` | `512Mi` | `-Xms256m -Xmx384m -XX:+UseG1GC` |
-| **`hdfs-datanode-1`** | `100m` | `500m` | `256Mi` | `512Mi` | `-Xms256m -Xmx384m -XX:+UseG1GC` |
+| **`hdfs-datanode-0`** | `100m` | `500m` | `256Mi` | `512Mi` | `-Xms128m -Xmx256m -XX:+UseG1GC` |
+| **`hdfs-datanode-1`** | `100m` | `500m` | `256Mi` | `512Mi` | `-Xms128m -Xmx256m -XX:+UseG1GC` |
 | **Tổng cộng HDFS Module 03** | **400m** | **2000m** | **1024Mi (1 GB)** | **2048Mi (2 GB)** | **Thực tế hoạt động: ~1.2 - 1.5 GB RAM** |
 
 ### 4.2. Cân đối toàn hệ sinh thái trên máy ảo 8 GB RAM
@@ -413,7 +413,7 @@ spec:
             - name: HADOOP_HOME
               value: "/opt/hadoop"
             - name: HADOOP_DATANODE_OPTS
-              value: "-Xms256m -Xmx384m -XX:+UseG1GC"
+              value: "-Xms128m -Xmx256m -XX:+UseG1GC"
           ports:
             - containerPort: 9864
               name: web

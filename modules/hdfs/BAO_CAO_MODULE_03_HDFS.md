@@ -273,6 +273,10 @@ HDFS ROOT (/)
   * `/batch/movie_stats/`: Lưu tổng hợp thống kê lượt rating và điểm trung bình theo từng phim.
   * `/batch/movie_daily_stats/`: Lưu xu hướng tương tác theo từng ngày của phim.
   * `/batch/genre_daily_stats/`: Lưu xu hướng tương tác theo thể loại phim.
+* **Đặc thù phối hợp & Tối ưu hóa thực tế khi chạy MapReduce:**
+  * **Hạ Heap DataNode triệt tiêu OOMKilled:** Cấu hình heap DataNode trong `03-datanode.yaml` được điều chỉnh chính thức thành `-Xms128m -Xmx256m` (thay vì `-Xmx384m` quá sát mức limit 512Mi), giải phóng 256Mi RAM vùng đệm giúp DataNode không còn bị K8s OOMKilled khi MapReduce thực hiện các tác vụ đọc/ghi block nặng.
+  * **Xử lý 1.000 dòng trùng lặp trong `/raw/ratings`:** Do Kafka Ingestion Sink từng bị trễ I/O vượt ngưỡng `max.poll.interval.ms` dẫn tới rebalance và đọc lại một lô, tập `/raw/ratings` có 1.000 dòng trùng `event_id`. Phía Module 04 đã chủ động tích hợp bước deduplication nên toàn bộ kết quả Batch ra lò đều chính xác 100%.
+  * **Quy tắc thống nhất:** Không kích hoạt lại producer khi `/raw` đã có dữ liệu để tránh phát sinh thêm bản ghi lặp.
 
 ---
 
@@ -313,7 +317,7 @@ Namespace: bigdata
 * `dfs.replication = 2`: Phù hợp chính xác với số lượng 2 DataNodes.
 * `dfs.blocksize = 33554432` (**32 MB**): Thay vì 128 MB mặc định, giúp tối ưu hóa lưu trữ và đọc nhanh các file dữ liệu kích thước nhỏ (JSON Lines hàng ngày).
 * `dfs.datanode.use.datanode.hostname = true`: Giải quyết xung đột DNS nội bộ giữa các Pod trong mạng Kubernetes.
-* `JVM Heap Memory`: NameNode cấp `-Xms512m -Xmx768m`, DataNode cấp `-Xms256m -Xmx384m` kết hợp bộ thu gom rác hiện đại `UseG1GC`.
+* `JVM Heap Memory`: NameNode cấp `-Xms512m -Xmx768m`, DataNode cấp `-Xms128m -Xmx256m` kết hợp bộ thu gom rác hiện đại `UseG1GC` (hạ từ `-Xmx384m` để dành 256Mi RAM cho Pod memory overhead, đảm bảo chạy MapReduce ổn định không bị OOMKilled).
 
 ---
 

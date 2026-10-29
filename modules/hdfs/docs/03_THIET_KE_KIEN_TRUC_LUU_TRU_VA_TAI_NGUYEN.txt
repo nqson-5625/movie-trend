@@ -123,7 +123,7 @@ Trong tệp manifest Kubernetes (StatefulSet) hoặc file cấu hình:
 - NameNode JVM:
   export HADOOP_NAMENODE_OPTS="-Xms512m -Xmx768m -XX:+UseG1GC"
 - DataNode JVM:
-  export HADOOP_DATANODE_OPTS="-Xms256m -Xmx384m -XX:+UseG1GC"
+  export HADOOP_DATANODE_OPTS="-Xms128m -Xmx256m -XX:+UseG1GC"
 
 C. Tinh chỉnh thông số HDFS trong `hdfs-site.xml`:
 1. Giảm Block Size:

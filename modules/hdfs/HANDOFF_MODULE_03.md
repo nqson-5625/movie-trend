@@ -66,6 +66,18 @@ Tài liệu này xác lập quy chuẩn bàn giao (Handoff) và tiêu chí nghi�
     * `/batch/movie_daily_stats/run_id=<run_id>/`
     * `/batch/genre_daily_stats/run_id=<run_id>/`
     * `/batch/_meta/run_id=<run_id>/manifest.json`
+- **Tối ưu tài nguyên Pod DataNode (Khắc phục OOMKilled):**
+  - Trong `modules/hdfs/k8s/03-datanode.yaml`, cấu hình JVM Heap của DataNode đã được điều chỉnh thành:
+    `-Xms128m -Xmx256m -XX:+UseG1GC` (so với mức cũ `-Xmx384m` quá sát giới hạn `limits.memory: 512Mi` của Pod).
+  - Cấu hình này dành ra khoảng 256 MiB đệm cho Native memory, Metaspace, thread stacks và I/O buffers, giúp DataNode hoạt động hoàn toàn ổn định khi Module 04 chạy các MapReduce jobs đọc/ghi dữ liệu song song mà không bị Kubernetes OOMKilled (Exit Code 137).
+- **Lưu ý chất lượng dữ liệu & Deduplication:**
+  - Trong `/raw/ratings` có ghi nhận **1.000 dòng bị trùng `event_id`** (nguyên nhân: Ingestion Sink bị trễ I/O trong một đợt ghi dẫn đến vượt ngưỡng `max.poll.interval.ms` của Kafka Consumer, Kafka kích hoạt rebalance và sink đọc lại một lô 1.000 events).
+  - **Module 04 đã xử lý:** Đỗ Sơn (Module 04) đã tích hợp cơ chế loại trùng (deduplication theo `event_id`) trong tầng MapReduce, do đó kết quả tính toán batch (`movie_stats`, `genre_daily_stats`, `movie_daily_stats`) hoàn toàn chính xác.
+- **QUY TẮC VẬN HÀNH BẮT BUỘC (CRITICAL NOTE):**
+  > [!IMPORTANT]
+  > **TUYỆT ĐỐI KHÔNG CHẠY LẠI PRODUCER KHI `/raw` ĐÃ CÓ DỮ LIỆU!**  
+  > Do cơ chế HDFS Sink daemon là streaming append vào các file theo phân vùng ngày `dt=YYYY-MM-DD`, việc kích hoạt lại Kafka Producer (`make producer` hoặc `movie_producer.py`) khi dữ liệu thô đã tồn tại trên HDFS sẽ làm tăng sinh thêm các sự kiện trùng lặp.  
+  > Nếu muốn chạy lại pipeline từ đầu để nghiệm thu hoặc đo benchmark: bắt buộc phải xóa sạch dữ liệu cũ trong `/raw/ratings` trên HDFS trước (hoặc chạy lại chu trình khởi tạo `make clean && make init`).
 - **Lệnh kiểm tra:**
   ```bash
   make -C modules/hdfs verify-mr
@@ -87,5 +99,8 @@ Khi thực hiện tích hợp, các bên sẽ đối chiếu và ký xác nhận
 - [ ] **Xác nhận bàn giao Module 03 $\rightarrow$ Module 04:**
   - Trạng thái input: Đã sẵn sàng tại `/movies/ref/current/` và `/raw/ratings/`
   - Trạng thái quyền `/batch`: Write permission OK (777)
+  - Cấu hình DataNode: Đã cập nhật `-Xms128m -Xmx256m` trong `03-datanode.yaml` (MapReduce chạy mượt, không bị OOMKilled)
+  - Dữ liệu thô `/raw/ratings`: Ghi nhận 1.000 dòng trùng do `max.poll.interval.ms` — Module 04 đã loại trùng thành công
+  - Quy tắc vận hành: Đã thống nhất KHÔNG chạy lại producer khi `/raw` đã có dữ liệu
   - Ngày xác nhận: `... / ... / 2026`
   - Người xác nhận: Đỗ Sơn (Module 04) & Giang (Module 03).

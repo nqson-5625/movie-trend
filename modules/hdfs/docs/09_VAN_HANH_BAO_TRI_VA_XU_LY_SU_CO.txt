@@ -61,7 +61,10 @@ SỰ CỐ 3: TIẾN TRÌNH JAVA BỊ CRASH DO THIẾU BỘ NHỚ RAM (OOM KILLER
 - Cách xử lý:
   1. Kiểm tra cấu hình JVM Heap:
      - NameNode: `-Xms512m -Xmx768m` (Limit K8s: 1024Mi)
-     - DataNode: `-Xms256m -Xmx384m` (Limit K8s: 512Mi)
+     - DataNode: `-Xms128m -Xmx256m` (Limit K8s: 512Mi)
+     * Lưu ý: Mức heap cũ `-Xmx384m` quá sát giới hạn 512Mi của container, khi Module 04 chạy
+       MapReduce I/O lớn khiến tổng RAM (Heap + Native/Metaspace) vượt 512Mi và bị OOMKilled.
+       Đã hạ vĩnh viễn xuống `-Xms128m -Xmx256m` trong `modules/hdfs/k8s/03-datanode.yaml`.
   2. Bật Swap Memory 4 GB trên Ubuntu VM:
      sudo fallocate -l 4G /swapfile
      sudo chmod 600 /swapfile
@@ -89,4 +92,16 @@ SỰ CỐ 5: SAO LƯU VÀ PHỤC HỒI METADATA NAMENODE
      kubectl exec -it -n bigdata pod/hdfs-namenode-0 -- hdfs dfsadmin -safemode leave
   2. Copy thư mục metadata ra ngoài máy chủ để sao lưu:
      kubectl cp -n bigdata hdfs-namenode-0:/opt/hadoop/data/nameNode ./backup_namenode_metadata
+
+--------------------------------------------------------------------------------
+SỰ CỐ 6: XUẤT HIỆN DỮ LIỆU TRÙNG LẶP DO KAFKA SINK VƯỢT MAX.POLL.INTERVAL.MS
+- Hiện tượng: Quét dữ liệu thấy khoảng 1.000 dòng trùng lặp `event_id` trong `/raw/ratings`.
+- Nguyên nhân: Trong đợt ghi dữ liệu lớn, Ingestion Sink Daemon bị trễ I/O vượt quá ngưỡng
+  `max.poll.interval.ms` (300.000 ms) của Kafka Consumer, dẫn tới coordinator kích hoạt rebalance
+  và Sink đọc lại 1 lô 1.000 sự kiện từ committed offset trước.
+- Giải pháp & Quy định:
+  1. Module 04 (MapReduce - Đỗ Sơn) đã triển khai logic loại trùng (deduplication theo `event_id`),
+     vì vậy kết quả tính toán Batch (`movie_stats`, `genre_daily_stats`) hoàn toàn chính xác.
+  2. QUY TẮC BẮT BUỘC: TUYỆT ĐỐI KHÔNG CHẠY LẠI PRODUCER KHI `/raw` ĐÃ CÓ DỮ LIỆU để tránh
+     tiếp tục append thêm các sự kiện lặp lại vào các phân vùng ngày.
 ================================================================================

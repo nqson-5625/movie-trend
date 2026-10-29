@@ -76,6 +76,15 @@ Giang đã chuẩn bị xong môi trường lưu trữ HDFS phục vụ các Job
 3. Sơn có thể chạy thử lệnh kiểm tra kết nối bằng script:
    `bash modules/hdfs/scripts/verify_mapreduce_handoff.sh`
 
+4. Các lưu ý kỹ thuật quan trọng đã đồng bộ:
+   - Cấu hình Pod DataNode: Đã cập nhật chính thức trong `modules/hdfs/k8s/03-datanode.yaml`
+     với heap `-Xms128m -Xmx256m -XX:+UseG1GC` (hạ từ 384m để tránh OOMKilled khi MapReduce chạy nặng).
+     Bản sửa đã lưu vào file yaml gốc nên mỗi lần chạy `./run.sh` sẽ giữ nguyên cấu hình này.
+   - Dữ liệu thô `/raw/ratings`: Có 1.000 dòng trùng `event_id` do đợt chạy trước Sink bị trễ I/O
+     vượt `max.poll.interval.ms` rồi re-poll đọc lại 1 lô. Sơn (Module 04) đã tích hợp deduplication
+     theo `event_id` nên kết quả Batch hoàn toàn chính xác.
+   - QUY TẮC BẮT BUỘC: Tuyệt đối KHÔNG chạy lại producer khi `/raw` đã có dữ liệu để tránh sinh thêm dữ liệu trùng lặp.
+
 --------------------------------------------------------------------------------
 4. DÀN Ý TRÌNH BÀY PHẦN MODULE 03 KHI BÁO CÁO BẢO VỆ BTL
 --------------------------------------------------------------------------------
