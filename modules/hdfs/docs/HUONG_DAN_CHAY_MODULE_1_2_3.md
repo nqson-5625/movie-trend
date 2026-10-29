@@ -257,7 +257,7 @@ make -C modules/kafka_ingestion tmdb
 > 1. **Cơ chế Sink:** Ingestion Sink Daemon hoạt động theo phương thức streaming append liên tục vào các file phân vùng ngày `/raw/ratings/dt=YYYY-MM-DD/`. Do đó, nếu kích hoạt lại Producer (`make producer`) trong khi `/raw` đã chứa dữ liệu, hệ thống sẽ tiếp tục append thêm các bản ghi vào các file này, gây phình to dung lượng và phát sinh thêm dữ liệu lặp lại.
 > 2. **Hiện trạng dữ liệu thực tế:** Trong tập dữ liệu `/raw/ratings` hiện tại ghi nhận có **1.000 dòng trùng `event_id`** (nguyên nhân do trong một đợt ghi trước đây, Sink Daemon bị nghẽn I/O dẫn đến thời gian xử lý vượt quá ngưỡng `max.poll.interval.ms` của Kafka Consumer; Kafka Coordinator ngắt kết nối và rebalance group, sau đó Sink kết nối lại và đọc lại 1 lô 1.000 sự kiện).
 > 3. **Tính toàn vẹn của kết quả Batch:** **Module 04 (MapReduce - Đỗ Sơn) đã triển khai logic loại trùng (deduplication theo `event_id`)**, vì vậy kết quả tính toán batch (`movie_stats`, `genre_daily_stats`, `movie_daily_stats`) hoàn toàn chính xác.
-> 4. **Khuyến nghị vận hành:** Tuyệt đối không chạy lại Producer khi `/raw` đã có dữ liệu. Nếu bắt buộc cần chạy lại toàn bộ pipeline để benchmark, phải dọn dẹp sạch HDFS trước (`bash modules/hdfs/run.sh stop --all` rồi khởi tạo lại).
+> 4. **Khuyến nghị vận hành:** Tuyệt đối không chạy lại Producer khi /raw đã có dữ liệu. Nếu nạp bộ dữ liệu mới (chứa lại dữ liệu Version 1) hoặc cần benchmark lại từ đầu sạch 100%, hãy chạy script tự động dọn dẹp HDFS /raw và reset checkpoints: make -C modules/hdfs clean-raw (hoặc: ash modules/hdfs/scripts/clean_raw_replay.sh).
 
 ---
 

@@ -23,6 +23,7 @@ sys.path.insert(0, str(MODULE_DIR / "scripts"))
 
 from kafka_hdfs_sink import (
     HDFSSinkEngine,
+    KafkaHDFSSinkDaemon,
     extract_partition_date,
     validate_schema,
 )
@@ -36,15 +37,26 @@ def make_dummy_event_id(seed: str) -> str:
 class MockHDFSUploader:
     """Mock HDFS Uploader để kiểm tra đường dẫn và payload ghi xuống HDFS."""
 
-    def __init__(self, succeed: bool = True):
+    def __init__(self, succeed: bool = True, fail_after: int = 0):
         self.succeed = succeed
+        self.fail_after = fail_after
+        self.write_calls = 0
         self.written_files: Dict[str, str] = {}
+        self.deleted_files: List[str] = []
 
     def write_file(self, hdfs_path: str, data: str) -> bool:
+        self.write_calls += 1
+        if self.fail_after > 0 and self.write_calls > self.fail_after:
+            return False
         if self.succeed:
             self.written_files[hdfs_path] = data
             return True
         return False
+
+    def delete_file(self, hdfs_path: str) -> bool:
+        self.deleted_files.append(hdfs_path)
+        self.written_files.pop(hdfs_path, None)
+        return True
 
 
 class TestKafkaHDFSSink(unittest.TestCase):
@@ -250,6 +262,153 @@ class TestKafkaHDFSSink(unittest.TestCase):
         self.assertEqual(stats["failed"], 1)
         # Buffer không bị xóa khi ghi thất bại!
         self.assertEqual(failing_engine.pending_count(), 1)
+
+    def test_09_partial_flush_failure_rolls_back_written_files(self):
+        """[Test 9] Cách 1: Nếu flush lỗi giữa chừng (ghi được 1 ngày, ngày thứ 2 lỗi), tự động xóa file ngày 1 trên HDFS và giữ nguyên buffer."""
+        partial_uploader = MockHDFSUploader(succeed=True, fail_after=1)
+        engine = HDFSSinkEngine(uploader=partial_uploader, batch_size=10)
+
+        ev_day1 = json.dumps({
+            "schema_version": "1.0",
+            "event_id": make_dummy_event_id("ev-day1"),
+            "source": "movielens",
+            "userId": 1,
+            "movieId": 10,
+            "rating": 4.0,
+            "event_time": "2026-10-04T12:00:00Z",
+            "ingest_time": "2026-10-11T12:00:00Z"
+        })
+        ev_day2 = json.dumps({
+            "schema_version": "1.0",
+            "event_id": make_dummy_event_id("ev-day2"),
+            "source": "movielens",
+            "userId": 2,
+            "movieId": 20,
+            "rating": 5.0,
+            "event_time": "2026-10-05T12:00:00Z",
+            "ingest_time": "2026-10-11T12:00:00Z"
+        })
+        engine.process_record("movie-events", ev_day1)
+        engine.process_record("movie-events", ev_day2)
+        self.assertEqual(engine.pending_count(), 2)
+
+        stats = engine.flush(atomic_rollback=True)
+        # File thứ nhất đã bị xóa rollback, không còn file lẻ trên HDFS
+        self.assertEqual(stats["rolled_back_files"], 1)
+        self.assertEqual(stats["raw_written"], 0)
+        self.assertEqual(stats["failed"], 2)
+        self.assertEqual(len(partial_uploader.written_files), 0)
+        self.assertEqual(len(partial_uploader.deleted_files), 1)
+        # Cả 2 bản ghi đều được khôi phục lại trong buffer
+        self.assertEqual(engine.pending_count(), 2)
+
+    def test_10_rebalance_commit_failure_recovers_offset_without_duplication(self):
+        """[Test 10] Cách 2: Khi flush thành công nhưng commit lỗi do max.poll.interval.ms, giữ nguyên HDFS và bỏ qua đoạn đã ghi khi poll lại."""
+        daemon = KafkaHDFSSinkDaemon(batch_size=2, flush_interval_sec=5)
+        daemon.engine.uploader = self.uploader
+
+        class FakeMsg:
+            def __init__(self, topic: str, partition: int, offset: int, val: str):
+                self._topic = topic
+                self._partition = partition
+                self._offset = offset
+                self._val = val.encode("utf-8")
+
+            def error(self):
+                return None
+
+            def topic(self):
+                return self._topic
+
+            def partition(self):
+                return self._partition
+
+            def offset(self):
+                return self._offset
+
+            def value(self):
+                return self._val
+
+        class FakeConfluentClient:
+            def __init__(self):
+                self.batches = []
+                self.fail_next_commit = True
+                self.seeked = []
+                self.commits = 0
+
+            def consume(self, num_messages=10, timeout=1.0):
+                return self.batches.pop(0) if self.batches else []
+
+            def commit(self, *args, **kwargs):
+                if self.fail_next_commit:
+                    self.fail_next_commit = False
+                    raise RuntimeError("KafkaError{code=_MAX_POLL_EXCEEDED}")
+                self.commits += 1
+
+            def seek(self, tp):
+                self.seeked.append((tp.topic, tp.partition, tp.offset))
+
+        ev0 = json.dumps({
+            "schema_version": "1.0",
+            "event_id": make_dummy_event_id("ev-off-0"),
+            "source": "movielens",
+            "userId": 1,
+            "movieId": 1,
+            "rating": 4.0,
+            "event_time": "2026-10-04T12:00:00Z",
+            "ingest_time": "2026-10-11T12:00:00Z"
+        })
+        ev1 = json.dumps({
+            "schema_version": "1.0",
+            "event_id": make_dummy_event_id("ev-off-1"),
+            "source": "movielens",
+            "userId": 2,
+            "movieId": 2,
+            "rating": 5.0,
+            "event_time": "2026-10-04T12:01:00Z",
+            "ingest_time": "2026-10-11T12:01:00Z"
+        })
+        ev2 = json.dumps({
+            "schema_version": "1.0",
+            "event_id": make_dummy_event_id("ev-off-2"),
+            "source": "movielens",
+            "userId": 3,
+            "movieId": 3,
+            "rating": 3.5,
+            "event_time": "2026-10-04T12:02:00Z",
+            "ingest_time": "2026-10-11T12:02:00Z"
+        })
+
+        client = FakeConfluentClient()
+        # Lô 1: offset 0 và 1. Lô 2 (sau khi bị Rebalance): Kafka trả lại từ offset 0, 1 kèm bản ghi mới offset 2
+        client.batches = [
+            [FakeMsg("movie-events", 0, 0, ev0), FakeMsg("movie-events", 0, 1, ev1)],
+            [FakeMsg("movie-events", 0, 0, ev0), FakeMsg("movie-events", 0, 1, ev1), FakeMsg("movie-events", 0, 2, ev2)],
+        ]
+        consumer_tuple = ("confluent", client)
+
+        # Đợt 1: Poll offset 0, 1 -> Flush thành công -> Commit bị lỗi MAX_POLL_EXCEEDED
+        msgs1 = daemon._poll_messages(consumer_tuple, 1.0)
+        self.assertEqual(len(msgs1), 2)
+        for t, v in msgs1:
+            daemon.engine.process_record(t, v)
+        daemon._execute_flush_and_commit(consumer_tuple)
+
+        # Kiểm tra: Đã ghi HDFS 1 file (2 dòng), flushed_offsets lưu mốc 2, bật cờ needs_offset_recovery
+        self.assertEqual(daemon.flushed_offsets[("movie-events", 0)], 2)
+        self.assertTrue(daemon.needs_offset_recovery)
+        self.assertEqual(len(self.uploader.written_files), 1)
+
+        # Đợt 2: Sau Rebalance, Kafka trả lại offset 0, 1, 2 -> Sink tự bỏ qua 0, 1 và chỉ nhận offset 2!
+        msgs2 = daemon._poll_messages(consumer_tuple, 1.0)
+        self.assertEqual(len(msgs2), 1)
+        for t, v in msgs2:
+            daemon.engine.process_record(t, v)
+        daemon._execute_flush_and_commit(consumer_tuple)
+
+        # Tổng số bản ghi hợp lệ đã xử lý đúng bằng 3 (không bị nhân đôi offset 0 và 1!)
+        self.assertEqual(daemon.engine.total_valid, 3)
+        self.assertFalse(daemon.needs_offset_recovery)
 
 
 if __name__ == "__main__":

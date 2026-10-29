@@ -3,10 +3,11 @@
 # Script điều phối duy nhất cho Module 03 (HDFS Storage Layer trên Kubernetes k3s)
 # Tác giả: Giang (Module 03 - HDFS)
 # Sử dụng:
-#   ./run.sh          (Khởi chạy toàn diện: triển khai K8s, nạp ref, chạy ngầm)
-#   ./run.sh status   (Kiểm tra trạng thái cụm và các tiến trình ngầm)
-#   ./run.sh stop     (Dừng an toàn các tiến trình ngầm và cụm HDFS)
-#   ./run.sh restart  (Khởi động lại toàn bộ hệ thống)
+#   ./run.sh            (Khởi chạy toàn diện: kiểm tra checkpoint, K8s, nạp ref, chạy ngầm)
+#   ./run.sh status     (Kiểm tra trạng thái cụm và các tiến trình ngầm)
+#   ./run.sh clean-raw  (Tự động dọn sạch /raw và checkpoint để nạp bộ dữ liệu mới)
+#   ./run.sh stop       (Dừng an toàn các tiến trình ngầm và cụm HDFS)
+#   ./run.sh restart    (Khởi động lại toàn bộ hệ thống)
 # ==============================================================================
 
 set -o pipefail
@@ -128,7 +129,105 @@ deploy_k8s_cluster() {
 }
 
 # ------------------------------------------------------------------------------
-# 3. KHỞI TẠO CÂY THƯ MỤC & NẠP CANONICAL REFERENCE
+# 3. KIỂM TRA CHECKPOINT & HỎI XÁC NHẬN BỘ DỮ LIỆU
+# ------------------------------------------------------------------------------
+check_dataset_and_checkpoint() {
+    local cp_file=""
+    if [ -f "${PROJECT_ROOT}/data/local/kafka_ingestion/movie-checkpoint.json" ]; then
+        cp_file="${PROJECT_ROOT}/data/local/kafka_ingestion/movie-checkpoint.json"
+    elif [ -f "${PROJECT_ROOT}/modules/kafka_ingestion/state/movie-checkpoint.json" ]; then
+        cp_file="${PROJECT_ROOT}/modules/kafka_ingestion/state/movie-checkpoint.json"
+    fi
+
+    local ratings_file="${PROJECT_ROOT}/data/prepared/movielens/ratings_sorted.csv"
+    local has_hdfs_data=false
+
+    # Kiểm tra xem /raw/ratings trên HDFS đã có dữ liệu phân vùng ngày chưa
+    if kubectl get pod "${NAMENODE_POD}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+        local raw_count
+        raw_count=$(kubectl exec -i -n "${NAMESPACE}" "${NAMENODE_POD}" -c namenode -- hdfs dfs -ls /raw/ratings 2>/dev/null | grep -c "dt=" || true)
+        if [ "$raw_count" -gt 0 ]; then
+            has_hdfs_data=true
+        fi
+    fi
+
+    # Nếu có checkpoint cũ HOẶC /raw đã có dữ liệu
+    if [ -n "$cp_file" ] || [ "$has_hdfs_data" = true ]; then
+        local dataset_changed=false
+        local cp_info=""
+
+        if [ -n "$cp_file" ] && [ -f "$ratings_file" ]; then
+            local check_result
+            check_result=$("${PYTHON_BIN}" -c "
+import json, hashlib
+try:
+    with open('$cp_file', 'r', encoding='utf-8') as f:
+        cp = json.load(f)
+    cur_sha = hashlib.sha256(open('$ratings_file', 'rb').read()).hexdigest()
+    cp_sha = cp.get('sha256', '')
+    next_row = cp.get('next_row', 0)
+    changed = (cur_sha != cp_sha)
+    print(f'{changed}|{next_row}')
+except Exception:
+    print('false|0')
+" 2>/dev/null || echo "false|0")
+            dataset_changed=$(echo "$check_result" | cut -d'|' -f1)
+            local next_row
+            next_row=$(echo "$check_result" | cut -d'|' -f2)
+            cp_info=" (Đã gửi: ${next_row} bản ghi)"
+        fi
+
+        # Chỉ kích hoạt câu hỏi tương tác nếu chạy trong terminal (TTY)
+        if [ -t 0 ]; then
+            printf "\n${C_YELLOW}${C_BOLD}================================================================${C_RESET}\n"
+            printf "${C_YELLOW}${C_BOLD}   [PHÁT HIỆN CHECKPOINT & DỮ LIỆU HIỆN CÓ TRÊN HỆ THỐNG]       ${C_RESET}\n"
+            printf "${C_YELLOW}${C_BOLD}================================================================${C_RESET}\n"
+
+            if [ "$dataset_changed" = "True" ] || [ "$dataset_changed" = "true" ]; then
+                printf "${C_RED}${C_BOLD} [!] CẢNH BÁO: BỘ DỮ LIỆU NGUỒN ĐÃ THAY ĐỔI!${C_RESET}\n"
+                printf "     Mã băm SHA-256 của file 'ratings_sorted.csv' KHÁC với checkpoint cũ.\n"
+                printf "     Nếu tiếp tục chạy mà không dọn dẹp, Producer sẽ bị lỗi checkpoint mismatch,\n"
+                printf "     hoặc HDFS /raw sẽ bị append trùng lặp dữ liệu Version 1.\n\n"
+            else
+                printf "${C_CYAN} Hệ thống phát hiện dữ liệu từ phiên chạy trước:${C_RESET}\n"
+                [ -n "$cp_file" ] && printf "  * Checkpoint Producer:  %s%s\n" "$cp_file" "$cp_info"
+                [ "$has_hdfs_data" = true ] && printf "  * Phân vùng HDFS:       /raw/ratings/ đã chứa dữ liệu các ngày cũ.\n\n"
+            fi
+
+            printf "${C_BOLD}Bạn có muốn xóa dữ liệu cũ để chạy lại bộ dữ liệu mới không?${C_RESET}\n"
+            printf "  ${C_GREEN}1)${C_RESET} ${C_BOLD}Xóa sạch /raw và reset checkpoint${C_RESET} để nạp bộ dữ liệu mới sạch 100%%\n"
+            printf "     (${C_CYAN}Khuyến nghị khi đổi sang dataset lớn hơn hoặc muốn chạy lại từ đầu${C_RESET})\n"
+            printf "  ${C_BLUE}2)${C_RESET} Giữ nguyên dữ liệu cũ, chỉ bật cụm và chạy tiếp (Resume)\n"
+            printf "  ${C_RED}3)${C_RESET} Hủy bỏ (Thoát tiến trình để kiểm tra lại file)\n\n"
+
+            local default_choice="2"
+            [ "$dataset_changed" = "True" ] || [ "$dataset_changed" = "true" ] && default_choice="1"
+
+            read -r -p "Lựa chọn của bạn [1/2/3] (Mặc định: ${default_choice}): " user_choice
+            user_choice="${user_choice:-$default_choice}"
+
+            case "$user_choice" in
+                1)
+                    info "Bạn đã chọn: Tự động dọn sạch /raw và reset checkpoint..."
+                    bash "${SCRIPT_DIR}/scripts/clean_raw_replay.sh" --publish-ref --no-restart-sink
+                    ;;
+                2)
+                    info "Bạn đã chọn: Giữ nguyên dữ liệu cũ và tiếp tục khởi chạy."
+                    ;;
+                3)
+                    warn "Đã hủy bỏ thao tác theo yêu cầu của bạn. Thoát an toàn."
+                    exit 0
+                    ;;
+                *)
+                    warn "Lựa chọn không hợp lệ. Mặc định tiếp tục giữ nguyên dữ liệu."
+                    ;;
+            esac
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# 4. KHỞI TẠO CÂY THƯ MỤC & NẠP CANONICAL REFERENCE
 # ------------------------------------------------------------------------------
 init_hdfs_storage() {
     info "Đang kiểm tra và khởi tạo cấu trúc thư mục chuẩn trên HDFS (/raw, /quarantine, /movies, /batch)..."
@@ -152,12 +251,12 @@ init_hdfs_storage() {
 }
 
 # ------------------------------------------------------------------------------
-# 4. CHẠY NGẦM CÁC DỊCH VỤ PHỤ TRỢ (BACKGROUND SERVICES)
+# 5. CHẠY NGẦM CÁC DỊCH VỤ PHỤ TRỢ (BACKGROUND SERVICES)
 # ------------------------------------------------------------------------------
 start_background_services() {
     info "Đang cấu hình các tiến trình chạy ngầm..."
 
-    # 4.1. Port-forward Web UI (9870) và RPC (9000) với cơ chế tự động phục hồi (Auto-Reconnect)
+    # 5.1. Port-forward Web UI (9870) và RPC (9000) với cơ chế tự động phục hồi (Auto-Reconnect)
     if ! ss -tulpn 2>/dev/null | grep -q ":9870 "; then
         nohup bash -c 'while true; do kubectl port-forward --address 0.0.0.0 -n "'"${NAMESPACE}"'" pod/'"${NAMENODE_POD}"' 9870:9870 9000:9000 >> "'"${LOG_DIR}"'/port_forward.log" 2>&1; sleep 2; done' >/dev/null 2>&1 &
         local pf_pid=$!
@@ -168,7 +267,7 @@ start_background_services() {
         success "Port-forward đã đang mở trên cổng 9870 & 9000."
     fi
 
-    # 4.2. Ingestion Sink Daemon (Lắng nghe Kafka -> Sink HDFS)
+    # 5.2. Ingestion Sink Daemon (Lắng nghe Kafka -> Sink HDFS)
     local sink_pid=""
     if [ -f "${LOG_DIR}/kafka_sink.pid" ] && kill -0 "$(cat "${LOG_DIR}/kafka_sink.pid" 2>/dev/null)" 2>/dev/null; then
         sink_pid=$(cat "${LOG_DIR}/kafka_sink.pid")
@@ -191,7 +290,7 @@ start_background_services() {
 }
 
 # ------------------------------------------------------------------------------
-# 5. XEM TRẠNG THÁI HỆ THỐNG (STATUS)
+# 6. XEM TRẠNG THÁI HỆ THỐNG (STATUS)
 # ------------------------------------------------------------------------------
 show_status() {
     printf "\n${C_BOLD}=== TRẠNG THÁI HỆ THỐNG MODULE 03 (HDFS) ===${C_RESET}\n\n"
@@ -223,7 +322,7 @@ show_status() {
 }
 
 # ------------------------------------------------------------------------------
-# 6. DỪNG HỆ THỐNG AN TOÀN (STOP)
+# 7. DỪNG HỆ THỐNG AN TOÀN (STOP)
 # ------------------------------------------------------------------------------
 stop_services() {
     info "Đang dừng các tiến trình chạy ngầm của Module 03..."
@@ -264,6 +363,7 @@ case "${1:-start}" in
         
         check_environment
         deploy_k8s_cluster
+        check_dataset_and_checkpoint
         init_hdfs_storage
         start_background_services
 
@@ -279,6 +379,10 @@ case "${1:-start}" in
         printf "\nLệnh kiểm tra: ${C_YELLOW}bash modules/hdfs/run.sh status${C_RESET} | Lệnh dừng: ${C_YELLOW}bash modules/hdfs/run.sh stop${C_RESET}\n\n"
         exit 0
         ;;
+    clean-raw|clean_raw|reset-raw)
+        check_environment
+        bash "${SCRIPT_DIR}/scripts/clean_raw_replay.sh" "${@:2}"
+        ;;
     status|ps)
         check_environment
         show_status
@@ -293,7 +397,7 @@ case "${1:-start}" in
         exec "$0" start
         ;;
     *)
-        printf "Cách sử dụng: %s [start|status|stop|restart]\n" "$0"
+        printf "Cách sử dụng: %s [start|status|clean-raw|stop|restart]\n" "$0"
         exit 1
         ;;
 esac

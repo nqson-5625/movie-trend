@@ -21,7 +21,7 @@ NAMESPACE ?= bigdata
 NAMENODE_POD ?= hdfs-namenode-0
 
 .PHONY: help setup env pipeline verify test run-sink \
-        up down restart status ps report init publish-ref verify-mr forward stats clean
+        up down restart status ps report init publish-ref verify-mr forward stats clean clean-raw
 
 help:
 	@printf '%s\n' \
@@ -37,6 +37,7 @@ help:
 	  '  verify              Kiểm tra tính sẵn sàng của cụm HDFS K8s, file reference và phân quyền' \
 	  '  test                Chạy kiểm thử tích hợp tự động Module 01 -> Module 03 (offline)' \
 	  '  run-sink            Chạy Ingestion Daemon kéo dữ liệu từ Kafka xuống HDFS' \
+	  '  clean-raw           Xóa sạch dữ liệu /raw trên HDFS & checkpoints để nạp bộ dữ liệu mới' \
 	  '' \
 	  'Điều khiển cụm Kubernetes:' \
 	  '  up                  Triển khai cụm HDFS lên Kubernetes namespace: bigdata' \
@@ -142,6 +143,9 @@ clean:
 	kubectl delete -f "$(K8S_DIR)/" --ignore-not-found
 	kubectl delete pvc -l 'app in (hdfs-namenode, hdfs-datanode)' -n $(NAMESPACE) --ignore-not-found
 	@printf '%s\n' '[OK] Đã dọn dẹp sạch sẽ.'
+
+clean-raw:
+	bash "$(MODULE_DIR)/scripts/clean_raw_replay.sh"
 
 # ------------------------------------------------------------------------------
 # KIỂM THỬ & TIỆN ÍCH
