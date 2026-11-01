@@ -9,3 +9,4 @@ __pycache__/
 
 # Machine-local ingestion checkpoints, snapshot outbox and consumer audit
 data/local/
+data/test_data

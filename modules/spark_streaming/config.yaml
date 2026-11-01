@@ -1,0 +1,39 @@
+# ==============================================================================
+# CẤU HÌNH MODULE 05: SPARK STRUCTURED STREAMING (SPEED LAYER)
+# Tuân thủ 100% DATA_CONTRACT.md (Mục 5, 8, 11, 12, 16, 17)
+# ==============================================================================
+
+spark:
+  app_name: "movie-trend-speed-layer"
+  master: "local[2]"
+  driver_memory: "768m"
+  shuffle_partitions: 4
+  timezone: "UTC"
+  watermark_delay: "10 minutes"
+  trigger_interval: "15 seconds"
+
+kafka:
+  bootstrap_servers: "127.0.0.1:9092"
+  cluster_bootstrap_servers: "kafka-svc.bigdata.svc.cluster.local:9092"
+  starting_offsets: "earliest"
+  topics:
+    movie_events: "movie-events"
+    tmdb_snapshots: "tmdb-snapshots"
+
+hdfs:
+  default_fs: "hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000"
+  reference_path: "hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/movies/ref/current/movie_reference.tsv"
+  local_reference_fallback: "data/prepared/reference/movie_reference.tsv"
+  sample_reference_fallback: "data/test_data/movie-reference.sample.tsv"
+  test_data_dir: "data/test_data"
+  checkpoint_root: "hdfs://hdfs-namenode-svc.bigdata.svc.cluster.local:9000/checkpoint/spark"
+  local_checkpoint_root: "data/test_data/ckpt"
+
+elasticsearch:
+  enabled: true
+  http_url: "http://localhost:9200"
+  cluster_http_url: "http://elasticsearch-svc.bigdata.svc.cluster.local:9200"
+  indices:
+    movie_realtime_stats: "movie_realtime_stats"
+    genre_realtime: "genre_realtime"
+    tmdb_realtime: "tmdb_realtime"
