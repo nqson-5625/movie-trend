@@ -1,0 +1,87 @@
+# YARN ResourceManager (1 pod): nhận job, cấp container trên các NodeManager.
+# Pod này cũng là nơi gửi job (`hadoop jar ...`) vì đã có đủ Hadoop client + cấu hình.
+apiVersion: v1
+kind: Service
+metadata:
+  name: yarn-resourcemanager-svc
+  namespace: bigdata
+  labels:
+    app: yarn-resourcemanager
+spec:
+  selector:
+    app: yarn-resourcemanager
+  ports:
+    - { name: client, port: 8032 }
+    - { name: scheduler, port: 8030 }
+    - { name: tracker, port: 8031 }
+    - { name: admin, port: 8033 }
+    - { name: web, port: 8088 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yarn-resourcemanager-headless
+  namespace: bigdata
+  labels:
+    app: yarn-resourcemanager
+spec:
+  clusterIP: None
+  selector:
+    app: yarn-resourcemanager
+  ports:
+    - { name: web, port: 8088 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: yarn-resourcemanager
+  namespace: bigdata
+  labels:
+    app: yarn-resourcemanager
+    app.kubernetes.io/part-of: mapreduce
+spec:
+  serviceName: yarn-resourcemanager-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yarn-resourcemanager
+  template:
+    metadata:
+      labels:
+        app: yarn-resourcemanager
+    spec:
+      containers:
+        - name: resourcemanager
+          image: apache/hadoop:3.3.6
+          command: ["yarn", "resourcemanager"]
+          env:
+            - { name: HADOOP_HOME, value: /opt/hadoop }
+            - { name: YARN_RESOURCEMANAGER_OPTS, value: "-Xms128m -Xmx256m -XX:+UseG1GC" }
+            # Heap cho lệnh client chạy trong pod (hadoop jar, hdfs dfs, yarn logs)
+            - { name: HADOOP_CLIENT_OPTS, value: "-Xms64m -Xmx192m" }
+          ports:
+            - { containerPort: 8032, name: client }
+            - { containerPort: 8088, name: web }
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { cpu: 1000m, memory: 768Mi }
+          readinessProbe:
+            tcpSocket: { port: 8088 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 8032 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          volumeMounts:
+            - { name: hdfs-config, mountPath: /opt/hadoop/etc/hadoop/core-site.xml, subPath: core-site.xml }
+            - { name: hdfs-config, mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml, subPath: hdfs-site.xml }
+            - { name: yarn-config, mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml, subPath: yarn-site.xml }
+            - { name: yarn-config, mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml, subPath: mapred-site.xml }
+            - { name: yarn-config, mountPath: /opt/hadoop/etc/hadoop/capacity-scheduler.xml, subPath: capacity-scheduler.xml }
+      volumes:
+        - name: hdfs-config
+          configMap: { name: hdfs-config }   # của Module 03, chỉ đọc
+        - name: yarn-config
+          configMap: { name: yarn-config }
