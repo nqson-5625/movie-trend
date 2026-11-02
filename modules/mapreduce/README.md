@@ -104,12 +104,10 @@ Chạy mọi lệnh từ thư mục gốc repo (`~/movie-trend`). Ghi chú trong
   - `sudo systemctl start k3s`
 - Bật HDFS, chọn **một** trong hai cách:
   - Máy chưa dựng HDFS (1 lần): `bash modules/hdfs/run.sh`
+    (nếu script hỏi có xoá dữ liệu cũ không thì chọn `2` để giữ `/raw`)
   - Máy đã dựng HDFS rồi (mỗi lần):
     - `kubectl scale statefulset/hdfs-namenode -n bigdata --replicas=1`
     - `kubectl scale statefulset/hdfs-datanode -n bigdata --replicas=2`
-- Hạ heap DataNode để tránh `OOMKilled` (mỗi lần chạy `run.sh`, vì script đặt lại heap 384 MB):
-  - `kubectl set env statefulset/hdfs-datanode -n bigdata HADOOP_DATANODE_OPTS="-Xms128m -Xmx256m -XX:+UseG1GC"`
-  - `kubectl rollout status statefulset/hdfs-datanode -n bigdata`
 - Kiểm tra:
   - `kubectl get pods -n bigdata`
   - Kỳ vọng: `hdfs-namenode-0`, `hdfs-datanode-0`, `hdfs-datanode-1` đều `1/1 Running`.
@@ -186,7 +184,7 @@ Chạy mọi lệnh từ thư mục gốc repo (`~/movie-trend`). Ghi chú trong
 | Hiện tượng | Cách xử lý |
 | --- | --- |
 | `kubectl`: permission denied với `/etc/rancher/k3s/k3s.yaml` | `export KUBECONFIG=$HOME/.kube/config` (hoặc `sudo chmod 644 /etc/rancher/k3s/k3s.yaml`) |
-| Pod `hdfs-datanode-*` bị `OOMKilled` / restart liên tục | heap 384 MB quá sát limit 512Mi; tạm hạ heap: `kubectl set env statefulset/hdfs-datanode -n bigdata HADOOP_DATANODE_OPTS="-Xms128m -Xmx256m -XX:+UseG1GC"` |
+| Pod `hdfs-datanode-*` bị `OOMKilled` / restart liên tục | Cụm còn heap cũ 384 MB; Module 03 đã hạ xuống 256 MB, áp lại manifest: `kubectl apply -f modules/hdfs/k8s/03-datanode.yaml` |
 | `YARN chưa chạy` | `make -C modules/mapreduce yarn-up` |
 | `Thiếu /apps/python/...` | `make -C modules/mapreduce python-archive` |
 | `run_id=... đã được publish` | Mỗi `run_id` chỉ publish một lần; chạy lại sau 1 giây hoặc đặt `RUN_ID=` khác |
