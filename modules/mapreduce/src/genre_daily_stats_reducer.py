@@ -3,7 +3,7 @@
 
 Out: date, genre, interaction_count, rating_count, rating_sum, avg_rating, batch_run_id, batch_cutoff_time, generated_at
 """
-from mr_common import read_tail, run_reducer, stats
+from modules.mapreduce.src.mr_common import read_tail, run_reducer, stats
 
 if __name__ == "__main__":
     tail = read_tail()

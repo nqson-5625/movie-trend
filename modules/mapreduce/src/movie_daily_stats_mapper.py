@@ -3,7 +3,7 @@
 
 Out: `YYYY-MM-DD|movieId TAB event_id TAB rating`. Env: BATCH_CUTOFF_TIME.
 """
-from mr_common import run_mapper
+from modules.mapreduce.src.mr_common import run_mapper
 
 if __name__ == "__main__":
     run_mapper("movie_daily_stats", lambda movie_id, event_time: [f"{event_time[:10]}|{movie_id}"])
