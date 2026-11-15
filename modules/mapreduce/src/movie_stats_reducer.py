@@ -4,7 +4,7 @@
 Out: movieId, title, total_count, rating_count, rating_sum, avg_rating, batch_run_id, batch_cutoff_time, generated_at
 Env: BATCH_RUN_ID, BATCH_CUTOFF_TIME, GENERATED_AT. Title lấy từ movie_reference.tsv (gửi qua -files), không bắt buộc.
 """
-from modules.mapreduce.src.mr_common import counter, load_reference, read_tail, run_reducer, stats
+from mr_common import counter, load_reference, read_tail, run_reducer, stats
 
 if __name__ == "__main__":
     tail = read_tail()

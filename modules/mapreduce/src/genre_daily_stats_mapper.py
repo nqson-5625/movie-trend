@@ -8,7 +8,7 @@ giống Module 05 để Module 07 ghép Batch + Realtime đúng nhóm. Join miss
 """
 import sys
 
-from modules.mapreduce.src.mr_common import NO_GENRES, UNKNOWN_GENRE, counter, load_reference, run_mapper
+from mr_common import NO_GENRES, UNKNOWN_GENRE, counter, load_reference, run_mapper
 
 if __name__ == "__main__":
     reference = load_reference()

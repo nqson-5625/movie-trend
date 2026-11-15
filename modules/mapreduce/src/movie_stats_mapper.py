@@ -4,7 +4,7 @@
 In: ratings thô JSON Lines (schema movie-events v1.0). Out: `movieId TAB event_id TAB rating`.
 Env: BATCH_CUTOFF_TIME (UTC tròn giờ). Chỉ giữ event có event_time < BATCH_CUTOFF_TIME.
 """
-from modules.mapreduce.src.mr_common import run_mapper
+from mr_common import run_mapper
 
 if __name__ == "__main__":
     run_mapper("movie_stats", lambda movie_id, event_time: [str(movie_id)])
