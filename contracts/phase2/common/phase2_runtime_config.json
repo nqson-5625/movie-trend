@@ -1,0 +1,36 @@
+{
+  "schema_version": "phase2-2.2",
+  "elasticsearch_version": "8.15.3",
+  "timezone": "UTC",
+  "es_cluster_url": "http://elasticsearch-svc.bigdata.svc.cluster.local:9200",
+  "es_host_url": "http://127.0.0.1:9200",
+  "dev_namespace_prefixes": {
+    "p2": "dev_p2_",
+    "p3": "dev_p3_",
+    "p4": "dev_p4_",
+    "p5": "dev_p5_"
+  },
+  "source_indices": {
+    "movie_batch_stats": { "temp_view": "batch_movie", "owner": "p2", "layer": "batch" },
+    "movie_daily_stats": { "temp_view": "batch_movie_daily", "owner": "p2", "layer": "batch" },
+    "genre_trends": { "temp_view": "batch_genre", "owner": "p3", "layer": "batch" },
+    "movie_realtime_stats": { "temp_view": "rt_movie", "owner": "p4", "layer": "realtime" },
+    "genre_realtime": { "temp_view": "rt_genre", "owner": "p4", "layer": "realtime" },
+    "tmdb_realtime": { "temp_view": "tmdb_rt", "owner": "p5", "layer": "realtime" }
+  },
+  "analytics_indices": {
+    "analytics_timeseries": { "owner": "p2", "dashboard": "D1/D2" },
+    "analytics_top_movies": { "owner": "p2", "dashboard": "D1" },
+    "analytics_genre_trends": { "owner": "p3", "dashboard": "D3" },
+    "analytics_growth": { "owner": "p4", "dashboard": "D4" },
+    "analytics_tmdb_signal": { "owner": "p5", "dashboard": "D5" }
+  },
+  "batch_publication_aliases": [
+    "movie_batch_stats",
+    "movie_daily_stats",
+    "genre_trends",
+    "analytics_timeseries",
+    "analytics_top_movies",
+    "analytics_genre_trends"
+  ]
+}
