@@ -1,0 +1,27 @@
+{
+  "index_patterns": [
+    "tmdb_realtime",
+    "dev_p2_tmdb_realtime*",
+    "dev_p3_tmdb_realtime*",
+    "dev_p4_tmdb_realtime*",
+    "dev_p5_tmdb_realtime*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "tmdbId": { "type": "integer" },
+        "event_time": { "type": "date", "format": "strict_date_optional_time||strict_date" },
+        "popularity": { "type": "double" },
+        "vote_count": { "type": "long" },
+        "vote_average": { "type": "double" },
+        "prev_popularity": { "type": "double" },
+        "popularity_delta": { "type": "double" },
+        "updated_at": { "type": "date", "format": "strict_date_optional_time||strict_date" }
+      }
+    }
+  }
+}
