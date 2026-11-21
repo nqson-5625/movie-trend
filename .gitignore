@@ -6,7 +6,7 @@ data/quarantine/
 *.log
 __pycache__/
 .pytest_cache
-
+.vscode 
 # Machine-local ingestion checkpoints, snapshot outbox and consumer audit
 data/local/
 data/test_data
