@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -196,13 +197,28 @@ def read_es_source_df(
     client: Optional[ESClient] = None,
     query: Optional[Dict[str, Any]] = None,
     page_size: int = 5000,
+    mode: str = "fixture",
 ) -> DataFrame:
-    """Đọc toàn bộ document từ 1 physical index hoặc alias trên ES qua PIT và trả về DataFrame."""
+    """Read a source using fixture REST/PIT mode or the distributed Spark connector."""
     if temp_view not in SOURCE_SCHEMAS:
         raise ValueError(
             f"temp_view không hợp lệ: {temp_view!r}. Hợp lệ: {sorted(SOURCE_SCHEMAS)}"
         )
     target_index = validate_index_name(index_name or TEMP_VIEW_TO_DEFAULT_INDEX[temp_view])
+    if mode not in {"fixture", "distributed"}:
+        raise ValueError("mode phải là 'fixture' hoặc 'distributed'")
+    if mode == "distributed":
+        contract = load_runtime_config()
+        reader = (
+            spark.read.format(str(contract["spark_es_format"]))
+            .schema(SOURCE_SCHEMAS[temp_view])
+            .option("es.resource", target_index)
+            .option("es.nodes.wan.only", "true")
+        )
+        if query is not None:
+            reader = reader.option("es.query", json.dumps(query, separators=(",", ":")))
+        return reader.load()
+
     es = client or ESClient(owner="p1")  # Đọc read-only không cần quyền ghi
     docs = es.search_all_pit(
         target_index,
@@ -220,6 +236,7 @@ def register_temp_view(
     client: Optional[ESClient] = None,
     query: Optional[Dict[str, Any]] = None,
     page_size: int = 5000,
+    mode: str = "fixture",
 ) -> DataFrame:
     """Đọc dữ liệu từ ES và đăng ký thành Temp View chuẩn cho spark.sql(...)."""
     df = read_es_source_df(
@@ -229,6 +246,7 @@ def register_temp_view(
         client=client,
         query=query,
         page_size=page_size,
+        mode=mode,
     )
     df.createOrReplaceTempView(temp_view)
     return df
@@ -239,6 +257,7 @@ def register_all_temp_views(
     index_overrides: Optional[Mapping[str, str]] = None,
     views: Optional[Sequence[str]] = None,
     client: Optional[ESClient] = None,
+    mode: str = "fixture",
 ) -> Dict[str, int]:
     """Nạp và đăng ký đồng loạt các Temp View được chọn, trả về số dòng từng view."""
     target_views = list(views or SOURCE_SCHEMAS.keys())
@@ -250,6 +269,7 @@ def register_all_temp_views(
             temp_view=view_name,
             index_name=overrides.get(view_name),
             client=client,
+            mode=mode,
         )
         counts[view_name] = df.count()
     return counts
