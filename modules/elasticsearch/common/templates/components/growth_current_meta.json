@@ -1,0 +1,18 @@
+{
+  "template": {
+    "mappings": {
+      "properties": {
+        "snapshot_version": { "type": "keyword" },
+        "selected_window_start": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "source_complete_through": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "history_analytics_run_id": { "type": "keyword" }
+      }
+    }
+  }
+}

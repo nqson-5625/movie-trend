@@ -2,6 +2,7 @@
   "index_patterns": [
     "analytics_tmdb_signal",
     "analytics_tmdb_signal_*",
+    "analytics_tmdb_signal-v*",
     "dev_p2_analytics_tmdb_signal*",
     "dev_p3_analytics_tmdb_signal*",
     "dev_p4_analytics_tmdb_signal*",
@@ -9,7 +10,8 @@
   ],
   "priority": 200,
   "composed_of": [
-    "movie_trend_base_settings"
+    "movie_trend_base_settings",
+    "movie_trend_analytics_meta"
   ],
   "template": {
     "mappings": {

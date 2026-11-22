@@ -1,0 +1,14 @@
+{
+  "template": {
+    "mappings": {
+      "properties": {
+        "schema_version": { "type": "keyword" },
+        "analytics_run_id": { "type": "keyword" },
+        "published_at": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        }
+      }
+    }
+  }
+}
