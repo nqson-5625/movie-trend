@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,6 +43,27 @@ def test_owner_permissions_and_nan_guard() -> None:
         p5.delete_index("tmdb_realtime")  # Không được xóa canonical
     with pytest.raises(ValueError):
         p5.bulk_upsert("dev_p5_tmdb_realtime_nan", [{"_id": "1", "popularity": math.nan}])
+
+
+def test_auth_tls_configuration_and_truncated_bulk_response() -> None:
+    client = ESClient(
+        owner="p5",
+        base_url="https://es.example.test:9200",
+        username="p5-user",
+        password="secret",
+        verify_tls=False,
+    )
+    assert client._session.auth == ("p5-user", "secret")
+    assert client._verify is False
+
+    client._request = lambda *args, **kwargs: SimpleNamespace(  # type: ignore[method-assign]
+        json=lambda: {"errors": False, "items": []}
+    )
+    with pytest.raises(RuntimeError, match="Bulk response thiếu item"):
+        client.bulk_upsert(
+            "dev_p5_bulk_truncated",
+            [{"_id": "550", "tmdbId": 550}],
+        )
 
 
 @pytest.mark.skipif(os.environ.get("ES_LIVE_TEST") != "1", reason="Đặt ES_LIVE_TEST=1 để chạy test live")

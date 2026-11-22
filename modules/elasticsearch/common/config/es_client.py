@@ -112,6 +112,10 @@ class ESClient:
         base_url: Optional[str] = None,
         timeout: float = 30.0,
         max_retries: int = 3,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        ca_cert: Optional[str] = None,
+        verify_tls: Optional[bool] = None,
     ):
         if owner not in OWNER_WRITE_PATTERNS:
             raise ValueError(
@@ -128,6 +132,19 @@ class ESClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self._session = requests.Session()
+        resolved_username = username or os.environ.get("ES_USERNAME")
+        resolved_password = password or os.environ.get("ES_PASSWORD")
+        if bool(resolved_username) != bool(resolved_password):
+            raise ValueError("ES_USERNAME và ES_PASSWORD phải được cấu hình cùng nhau")
+        if resolved_username and resolved_password:
+            self._session.auth = (resolved_username, resolved_password)
+
+        resolved_ca = ca_cert or os.environ.get("ES_CA_CERT")
+        if verify_tls is None:
+            verify_tls = os.environ.get("ES_VERIFY_TLS", "true").strip().lower() not in {
+                "0", "false", "no"
+            }
+        self._verify: bool | str = resolved_ca or bool(verify_tls)
 
     def _check_write_permission(self, index_name: str) -> None:
         patterns = OWNER_WRITE_PATTERNS[self.owner]
@@ -171,6 +188,7 @@ class ESClient:
                     data=data,
                     headers=headers,
                     timeout=self.timeout,
+                    verify=self._verify,
                 )
             except (requests.ConnectionError, requests.Timeout):
                 if attempt >= self.max_retries:
@@ -200,6 +218,35 @@ class ESClient:
     def index_exists(self, index_name: str) -> bool:
         clean = validate_index_name(index_name)
         return self._request("HEAD", f"/{clean}", expected_statuses=(200, 404)).status_code == 200
+
+    def create_index(
+        self,
+        index_name: str,
+        body: Optional[Dict[str, Any]] = None,
+        *,
+        require_absent: bool = True,
+    ) -> Dict[str, Any]:
+        """Tạo physical index; mặc định cấm tái sử dụng tên version đã tồn tại."""
+        clean = validate_index_name(index_name)
+        self._check_write_permission(clean)
+        if require_absent and self.index_exists(clean):
+            raise ValueError(f"Physical index đã tồn tại và không được tái sử dụng: {clean}")
+        return self._request("PUT", f"/{clean}", json_body=body or {}).json()
+
+    def get_mapping(self, index_or_alias: str) -> Dict[str, Any]:
+        clean = validate_index_name(index_or_alias)
+        return self._request("GET", f"/{clean}/_mapping").json()
+
+    def refresh(self, index_or_alias: str) -> Dict[str, Any]:
+        clean = validate_index_name(index_or_alias)
+        return self._request("POST", f"/{clean}/_refresh").json()
+
+    def search_smoke(self, index_or_alias: str) -> Dict[str, Any]:
+        clean = validate_index_name(index_or_alias)
+        result = self.search(clean, {"size": 1, "track_total_hits": True})
+        total = result.get("hits", {}).get("total", {})
+        value = total.get("value", 0) if isinstance(total, dict) else int(total or 0)
+        return {"index_or_alias": clean, "searchable": True, "count_seen": int(value)}
 
     def delete_index(self, index_name: str, ignore_missing: bool = True) -> None:
         clean = validate_index_name(index_name)
@@ -279,6 +326,10 @@ class ESClient:
             ).json()
 
             items = resp.get("items", [])
+            if len(items) != len(chunk):
+                raise RuntimeError(
+                    f"Bulk response thiếu item trên '{clean}': gửi {len(chunk)}, nhận {len(items)}"
+                )
             total_sent += len(chunk)
             for idx, item in enumerate(items):
                 _, outcome = next(iter(item.items()))
