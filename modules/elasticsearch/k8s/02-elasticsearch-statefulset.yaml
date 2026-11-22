@@ -69,6 +69,11 @@ spec:
           env:
             - name: ES_JAVA_OPTS
               value: "-Xms512m -Xmx512m"
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-credentials
+                  key: elastic-password
           ports:
             - containerPort: 9200
               name: http
@@ -110,4 +115,4 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: 5Gi     
+            storage: 5Gi
