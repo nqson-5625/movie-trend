@@ -1,0 +1,41 @@
+name: phase2-platform
+
+on:
+  pull_request:
+    paths:
+      - "contracts/phase2/**"
+      - "modules/elasticsearch/**"
+      - "modules/spark_sql/**"
+      - ".github/workflows/phase2-platform.yml"
+  push:
+    paths:
+      - "contracts/phase2/**"
+      - "modules/elasticsearch/**"
+      - "modules/spark_sql/**"
+
+jobs:
+  common-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install shared runtime
+        run: python -m pip install -r modules/spark_sql/requirements.txt
+      - name: Validate executable contract
+        run: python -m modules.spark_sql.runner validate
+      - name: Validate JSON artifacts
+        run: |
+          python -m json.tool contracts/phase2/common/phase2_runtime_config.json >/dev/null
+          find modules/elasticsearch -name '*.json' -print0 | xargs -0 -n1 python -m json.tool >/dev/null
+      - name: Elasticsearch common tests
+        run: python -m pytest -q modules/elasticsearch/tests/common
+      - name: Spark SQL common tests
+        run: python -m pytest -q modules/spark_sql/tests/common

@@ -1,0 +1,37 @@
+{
+  "index_patterns": [
+    "analytics_tmdb_signal",
+    "analytics_tmdb_signal_*",
+    "analytics_tmdb_signal-v*",
+    "dev_p2_analytics_tmdb_signal*",
+    "dev_p3_analytics_tmdb_signal*",
+    "dev_p4_analytics_tmdb_signal*",
+    "dev_p5_analytics_tmdb_signal*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings",
+    "movie_trend_analytics_meta"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "tmdbId": { "type": "integer" },
+        "event_time": { "type": "date", "format": "strict_date_optional_time||strict_date" },
+        "popularity": { "type": "double" },
+        "vote_count": { "type": "long" },
+        "vote_average": { "type": "double" },
+        "prev_popularity": { "type": "double" },
+        "popularity_delta": { "type": "double" },
+        "updated_at": { "type": "date", "format": "strict_date_optional_time||strict_date" },
+        "title": {
+          "type": "text",
+          "fields": {
+            "keyword": { "type": "keyword", "ignore_above": 512 }
+          }
+        },
+        "source": { "type": "keyword" }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: 
+  name: elasticsearch-config 
+  namespace: bigdata
+  labels: 
+    app: elasticsearch
+    module: module-06
+data: 
+  elasticsearch.yml: |
+    cluster.name: movie-trend-es 
+    network.host: 0.0.0.0 
+    discovery.type: single-node
+    xpack.security.enabled: true
+    xpack.security.http.ssl.enabled: false
+    xpack.ml.enabled: false

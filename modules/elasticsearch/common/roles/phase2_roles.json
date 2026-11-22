@@ -1,0 +1,65 @@
+{
+  "movie_trend_batch_p2": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["movie_batch_stats-*", "movie_daily_stats-*", "analytics_timeseries-*", "analytics_top_movies-*", "dev_p2_*"] ,
+        "privileges": ["create_index", "create", "index", "write", "read", "view_index_metadata"]
+      }
+    ]
+  },
+  "movie_trend_batch_p3": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["genre_trends-*", "analytics_genre_trends-*", "dev_p3_*"] ,
+        "privileges": ["create_index", "create", "index", "write", "read", "view_index_metadata"]
+      }
+    ]
+  },
+  "movie_trend_spark_streaming": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["movie_realtime_stats", "genre_realtime", "tmdb_realtime"],
+        "privileges": ["create_index", "create", "index", "write", "read", "view_index_metadata"]
+      }
+    ]
+  },
+  "movie_trend_spark_sql_p4": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["movie_realtime_stats", "genre_realtime", "analytics_growth", "analytics_growth-*", "analytics_growth_current-v*", "dev_p4_*"] ,
+        "privileges": ["create_index", "create", "index", "write", "read", "view_index_metadata"]
+      }
+    ]
+  },
+  "movie_trend_spark_sql_p5": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["tmdb_realtime", "analytics_tmdb_signal-v*", "dev_p5_*"] ,
+        "privileges": ["create_index", "create", "index", "write", "read", "view_index_metadata"]
+      }
+    ]
+  },
+  "movie_trend_publisher": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["movie_batch_stats*", "movie_daily_stats*", "genre_trends*", "analytics_*"] ,
+        "privileges": ["read", "view_index_metadata"]
+      }
+    ]
+  },
+  "movie_trend_kibana_analytics_read": {
+    "cluster": [],
+    "indices": [
+      {
+        "names": ["analytics_timeseries", "analytics_top_movies", "analytics_genre_trends", "analytics_growth", "analytics_growth_current", "analytics_tmdb_signal"],
+        "privileges": ["read", "view_index_metadata"]
+      }
+    ]
+  }
+}
