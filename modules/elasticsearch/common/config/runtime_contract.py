@@ -58,8 +58,18 @@ def validate_runtime_contract(config: Dict[str, Any] | None = None) -> Dict[str,
 
     aliases = set((cfg.get("analytics_indices") or {}).keys())
     for data_view_id, spec in (cfg.get("data_views") or {}).items():
-        if not isinstance(spec, dict) or spec.get("alias") not in aliases:
+        if not isinstance(spec, dict):
+            errors.append(f"Data View {data_view_id} phải là object")
+            continue
+        if spec.get("alias") not in aliases:
             errors.append(f"Data View {data_view_id} không trỏ exact analytics alias")
+        if not isinstance(spec.get("name"), str) or not spec["name"].strip():
+            errors.append(f"Data View {data_view_id} thiếu name")
+        time_field = spec.get("time_field")
+        if time_field is not None and (
+            not isinstance(time_field, str) or not time_field.strip()
+        ):
+            errors.append(f"Data View {data_view_id} có time_field không hợp lệ")
 
     versioned = set(cfg.get("versioned_publication_aliases") or [])
     expected_versioned = {"analytics_growth_current", "analytics_tmdb_signal"}

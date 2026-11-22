@@ -30,13 +30,13 @@
     "analytics_tmdb_signal": { "owner": "p5", "dashboard": "D5" }
   },
   "data_views": {
-    "dv_d1_timeseries": { "alias": "analytics_timeseries", "time_field": null },
-    "dv_d1_top_movies": { "alias": "analytics_top_movies", "time_field": null },
-    "dv_d2_movie_timeseries": { "alias": "analytics_timeseries", "time_field": "period_start" },
-    "dv_d3_genre_trends": { "alias": "analytics_genre_trends", "time_field": "period_start" },
-    "dv_d4_growth_current": { "alias": "analytics_growth_current", "time_field": null },
-    "dv_d4_growth_history": { "alias": "analytics_growth", "time_field": "window_start" },
-    "dv_d5_tmdb_signal": { "alias": "analytics_tmdb_signal", "time_field": null }
+    "dv_d1_timeseries": { "name": "D1 - Historical timeseries", "alias": "analytics_timeseries", "time_field": null },
+    "dv_d1_top_movies": { "name": "D1 - Top movies", "alias": "analytics_top_movies", "time_field": null },
+    "dv_d2_movie_timeseries": { "name": "D2 - Movie trends", "alias": "analytics_timeseries", "time_field": "period_start" },
+    "dv_d3_genre_trends": { "name": "D3 - Genre trends", "alias": "analytics_genre_trends", "time_field": "period_start" },
+    "dv_d4_growth_current": { "name": "D4 - Current growth", "alias": "analytics_growth_current", "time_field": null },
+    "dv_d4_growth_history": { "name": "D4 - Growth history", "alias": "analytics_growth", "time_field": "window_start" },
+    "dv_d5_tmdb_signal": { "name": "D5 - TMDB signal", "alias": "analytics_tmdb_signal", "time_field": null }
   },
   "batch_publication_aliases": [
     "movie_batch_stats",

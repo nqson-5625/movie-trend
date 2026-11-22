@@ -60,6 +60,24 @@
         "names": ["analytics_timeseries", "analytics_top_movies", "analytics_genre_trends", "analytics_growth", "analytics_growth_current", "analytics_tmdb_signal"],
         "privileges": ["read", "view_index_metadata"]
       }
+    ],
+    "applications": [
+      {
+        "application": "kibana-.kibana",
+        "privileges": ["read"],
+        "resources": ["space:integration"]
+      }
+    ]
+  },
+  "movie_trend_kibana_integrator": {
+    "cluster": [],
+    "indices": [],
+    "applications": [
+      {
+        "application": "kibana-.kibana",
+        "privileges": ["feature_dashboard.all", "feature_visualize.all", "feature_savedObjectsManagement.all"],
+        "resources": ["space:integration"]
+      }
     ]
   }
 }
