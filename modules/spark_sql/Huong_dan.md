@@ -1,4 +1,4 @@
-# Hướng dẫn sử dụng `modules/spark_sql` (cho P2, P3, P4)
+# Hướng dẫn sử dụng `modules/spark_sql` (cho P2, P3, P4, P5)
 
 Tài liệu nhanh cách dùng hạ tầng Spark SQL dùng chung trong `modules/spark_sql/common/` để đọc dữ liệu từ Elasticsearch, chạy Spark SQL chuẩn UTC, sinh `_id` đúng contract và ghi kết quả analytics lên Elasticsearch.
 
@@ -6,9 +6,11 @@ Tài liệu nhanh cách dùng hạ tầng Spark SQL dùng chung trong `modules/s
 
 ## 1. Chuẩn bị nhanh
 
-1. **Chạy từ thư mục gốc repo `movie-trend/`** bằng Python trong `.venv` (kèm `PYTHONPATH=.` khi chạy script trực tiếp):
+1. **Cài runtime và validate contract** từ thư mục gốc repo:
    ```bash
-   PYTHONPATH=. .venv/bin/python <path_to_script.py>
+   .venv/bin/pip install -r modules/spark_sql/requirements.txt
+   make -C modules/spark_sql validate
+   make -C modules/spark_sql smoke
    ```
 2. **Bật port-forward Elasticsearch** (nếu test/chạy với ES trên k3s ở terminal khác):
    ```bash
@@ -17,8 +19,11 @@ Tài liệu nhanh cách dùng hạ tầng Spark SQL dùng chung trong `modules/s
    Kiểm tra `.env` có `ES_HTTP_URL=http://127.0.0.1:9200` (nếu bỏ trống thì `ESClient` cũng mặc định dùng `http://127.0.0.1:9200`).
 3. **3 quy tắc bắt buộc:**
    - Luôn tạo session bằng `create_spark_sql_session()` (đã khóa `UTC` và tối ưu RAM `768m`).
-   - **Không tự tạo `_id`**; dùng `write_analytics_df(...)` (hoặc `serialize_key_v1`) để hệ thống tự băm SHA-256 đúng chuẩn `v1`.
+   - Không tự tạo `_id`; dùng writer chung. Riêng `analytics_tmdb_signal` dùng
+     literal `tmdbId`, các family còn lại dùng serializer v1.
    - Chỉ ghi vào index thuộc `owner` của mình. Khi thử nghiệm, luôn ghi vào prefix `dev_p<N>_*` (không đè lên index canonical/alias).
+   - `mode="fixture"` dùng REST/PIT cho fixture nhỏ; `mode="distributed"` dùng
+     Spark connector và không thu toàn bộ dữ liệu về driver.
 
 ---
 
@@ -42,6 +47,8 @@ Tài liệu nhanh cách dùng hạ tầng Spark SQL dùng chung trong `modules/s
 | **P2** | `"p2"` | `movie_batch_stats*`, `movie_daily_stats*`, `analytics_timeseries*`, `analytics_top_movies*`, `dev_p2_*` | `analytics_timeseries`<br>`analytics_top_movies` | `("batch_run_id", "period_type", "period_start", "entity_type", "movieId")`<br>`("batch_run_id", "period_type", "period_start", "movieId")` |
 | **P3** | `"p3"` | `genre_trends*`, `analytics_genre_trends*`, `dev_p3_*` | `analytics_genre_trends` | `("batch_run_id", "period_type", "period_start", "genre")` |
 | **P4** | `"p4"` | `analytics_growth*`, `dev_p4_*` | `analytics_growth` | `("window_size", "window_start", "entity_type", "entity_key")` |
+| **P4** | `"p4"` | `analytics_growth*`, `dev_p4_*` | `analytics_growth_current` | `("window_size", "entity_type", "entity_key")` trong mỗi physical snapshot |
+| **P5** | `"p5"` | `analytics_tmdb_signal*`, `dev_p5_*` | `analytics_tmdb_signal` | `("tmdbId",)` literal |
 
 ---
 
@@ -383,3 +390,25 @@ Chạy bộ test kiểm tra hạ tầng chung `modules/spark_sql/common`:
 ```bash
 PYTHONPATH=. .venv/bin/pytest modules/spark_sql/tests/common/ -v
 ```
+
+## 5. Chạy SQL của owner qua shared runner
+
+Runner không chứa metric của lane. Owner cung cấp file SQL và các source bindings;
+runtime tự thêm `schema_version`, `analytics_run_id`, `published_at`, kiểm physical
+target và gọi writer đúng mode.
+
+```bash
+.venv/bin/python -m modules.spark_sql.runner run-query \
+  --view batch_movie=movie_batch_stats_20261024t104145z \
+  --view batch_movie_daily=movie_daily_stats_20261024t104145z \
+  --query-file path/to/owner_query.sql \
+  --analytics-family analytics_top_movies \
+  --target-index analytics_top_movies_20261024t104145z \
+  --analytics-run-id batch-20261024t104145z \
+  --owner p2 \
+  --io-mode distributed
+```
+
+`fixture` dùng REST/PIT và chỉ dành cho dữ liệu nhỏ/unit smoke. `distributed` yêu
+cầu connector qua `SPARK_ES_PACKAGE`, thực hiện duplicate/NaN checks và ghi theo
+partition, không `collect()` toàn output về driver.

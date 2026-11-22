@@ -1,6 +1,7 @@
 # Hướng dẫn sử dụng `modules/elasticsearch` (cho P1, P2, P3, P4, P5)
 
-Tài liệu nhanh cách bật Elasticsearch trên k3s, cài Index Template cho từng lane, dùng `ESClient` để ghi/đọc an toàn và xuất `READY report` công bố Batch.
+Tài liệu nhanh cách bật Elasticsearch có security trên k3s, cài templates/roles,
+dùng `ESClient` để ghi/đọc an toàn và công bố alias theo Phase2-3.0.
 
 ---
 
@@ -12,12 +13,17 @@ Chạy từ thư mục gốc `movie-trend/`:
 |---|---|---|
 | `make -C modules/elasticsearch up` | Triển khai ES 8.15.3 lên k3s (`bigdata`) và chờ Ready | Chỉ cần chạy 1 lần khi chưa có pod `elasticsearch-0`. |
 | `make -C modules/elasticsearch forward` | Mở cổng `127.0.0.1:9200` | Giữ chạy ở terminal riêng để code trên host gọi được ES. |
-| `make -C modules/elasticsearch init-templates` | Cài 2 component template + toàn bộ `lanes/*/templates/*.json` | Chạy lại mỗi khi thêm/sửa template JSON. |
+| `make -C modules/elasticsearch validate` | Kiểm inventory 6 source/6 analytics/7 Data Views | Chạy trước khi dựng môi trường. |
+| `make -C modules/elasticsearch init-templates` | Cài 4 component template + toàn bộ `lanes/*/templates/*.json` | Chạy lại mỗi khi thêm/sửa template JSON. |
+| `make -C modules/elasticsearch init-roles` | Cài các role least-privilege Phase 2 | Cần credentials quản trị trong `.env`. |
 | `make -C modules/elasticsearch health` | Kiểm tra cluster health, version & templates | Lưu báo cáo ra `data/local/phase2/es_reports/health_check.json`. |
 | `make -C modules/elasticsearch test` | Chạy unit test offline (`modules/elasticsearch/tests/common/`) | Thêm `test-live` để chạy cả test kết nối ES thật. |
 | `make -C modules/elasticsearch status` / `logs` | Xem trạng thái pod hoặc log ES | Dùng `down` để tắt pod (giữ dữ liệu), `clean` để xóa cả PVC. |
 
-Kiểm tra `.env` có `ES_HTTP_URL=http://127.0.0.1:9200` (nếu bỏ trống thì `ESClient` cũng mặc định dùng `http://127.0.0.1:9200`). Khi chạy script Python trực tiếp từ gốc repo, nhớ thêm `PYTHONPATH=.` trước `.venv/bin/python` (hoặc dùng `.venv/bin/python -m ...`).
+Trước `make up`, tạo Kubernetes Secret `elasticsearch-credentials` có key
+`elastic-password`. `.env` trên host phải có `ES_HTTP_URL`, `ES_USERNAME`,
+`ES_PASSWORD`; không commit giá trị thật. Khi chạy script Python trực tiếp từ gốc
+repo, dùng `.venv/bin/python -m ...`.
 
 ---
 
@@ -43,7 +49,9 @@ Kiểm tra `.env` có `ES_HTTP_URL=http://127.0.0.1:9200` (nếu bỏ trống th
 
 Đặt file `<ten_bang>.json` trong thư mục lane của bạn (`modules/elasticsearch/lanes/<lane>/templates/`):
 - **6 bảng Batch** (3 source + 3 analytics của P2, P3): dùng `"composed_of": ["movie_trend_base_settings", "movie_trend_batch_meta"]` *(riêng 3 source Batch thêm field `generated_at`; component `movie_trend_batch_meta` đã định nghĩa sẵn `batch_run_id` kiểu `keyword` và `batch_cutoff_time` kiểu `date` để P5 đối soát khi publish)*.
-- **5 bảng Realtime** (của P4, P5): dùng `"composed_of": ["movie_trend_base_settings"]`.
+- **Analytics** phải compose thêm `movie_trend_analytics_meta`; growth-current
+  compose thêm `movie_trend_growth_current_meta`. Source realtime chỉ dùng
+  `movie_trend_base_settings`.
 - **Quy tắc đặt `index_patterns`:** ghi rõ từng prefix `dev_p2_...`, `dev_p3_...`, `dev_p4_...`, `dev_p5_...`, **tránh viết `dev_*_<ten_bang>*`** kẻo khớp nhầm sang bảng `analytics_*`.
 
 Ví dụ file `modules/elasticsearch/lanes/genre_batch/templates/genre_trends.json` cho P3:
@@ -184,7 +192,7 @@ cutoff = "2018-09-26T14:59:10Z"
 
 report = ReadyReport(
     owner="p3",
-    schema_version="phase2-2.2",
+    schema_version="phase2-3.0",
     manifest_sha256="sha256_cua_batch_manifest",
     batch_run_id=run_id,
     batch_cutoff_time=cutoff,
@@ -245,3 +253,37 @@ make -C modules/elasticsearch rollback RUN_ID=20261122_run01
 | `BulkOperationError` | Document thiếu/thừa field hoặc sai kiểu dữ liệu (vì `dynamic: strict`) | Kiểm tra lại Index Template đã `init-templates` chưa và đối chiếu tên/kiểu cột với `DATA_CONTRACT_Phase2.md`. |
 | `ValueError` khi `bulk_upsert` | Thiếu `_id`, tên index không hợp lệ, hoặc số chứa `NaN`/`Infinity` | Đảm bảo mỗi record có `_id` hợp lệ từ `serialize_key_v1` và không có `NaN`/`Inf`. |
 | `ValueError` / `PublicationError` khi `publish` | Thiếu 1 trong 6 physical index, lệch `batch_run_id`/`batch_cutoff_time`/`ref_version`/`manifest_sha256`, hoặc còn `bulk_error_count > 0` | Đối chiếu lại 2 file READY report P2/P3 và dữ liệu thực tế trên 6 physical index trước khi `publish` lại. |
+
+## 5. Publisher dùng chung cho analytics versioned
+
+`analytics_growth_current` và `analytics_tmdb_signal` dùng cùng một publisher hạ
+tầng; logic build/metric vẫn thuộc owner của lane. READY report tối thiểu:
+
+```json
+{
+  "alias_name": "analytics_growth_current",
+  "physical_index": "analytics_growth_current-vsnapshot001",
+  "version": "snapshot001",
+  "analytics_run_id": "growth-run-001",
+  "schema_version": "phase2-3.0",
+  "row_count": 100,
+  "bulk_error_count": 0,
+  "duplicate_key_count": 0,
+  "completed_at": "2026-11-22T08:00:00Z",
+  "status": "READY",
+  "required_mapping_fields": [
+    "schema_version", "analytics_run_id", "published_at",
+    "snapshot_version", "source_complete_through", "history_analytics_run_id"
+  ]
+}
+```
+
+```bash
+.venv/bin/python -m modules.elasticsearch.common.publication.versioned_publisher \
+  publish --ready-report data/local/phase2/es_reports/growth_ready.json --dry-run
+.venv/bin/python -m modules.elasticsearch.common.publication.versioned_publisher \
+  publish --ready-report data/local/phase2/es_reports/growth_ready.json
+```
+
+Publisher kiểm allowlist, physical naming, mapping, count, metadata consistency,
+searchability, atomic alias swap và tự rollback nếu hậu kiểm lỗi.
