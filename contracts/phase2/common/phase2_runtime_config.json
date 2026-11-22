@@ -1,9 +1,12 @@
 {
-  "schema_version": "phase2-2.2",
+  "schema_version": "phase2-3.0",
   "elasticsearch_version": "8.15.3",
+  "kibana_version": "8.15.3",
+  "spark_version": "3.5.1",
   "timezone": "UTC",
   "es_cluster_url": "http://elasticsearch-svc.bigdata.svc.cluster.local:9200",
   "es_host_url": "http://127.0.0.1:9200",
+  "spark_es_format": "org.elasticsearch.spark.sql",
   "dev_namespace_prefixes": {
     "p2": "dev_p2_",
     "p3": "dev_p3_",
@@ -23,7 +26,17 @@
     "analytics_top_movies": { "owner": "p2", "dashboard": "D1" },
     "analytics_genre_trends": { "owner": "p3", "dashboard": "D3" },
     "analytics_growth": { "owner": "p4", "dashboard": "D4" },
+    "analytics_growth_current": { "owner": "p4", "dashboard": "D4" },
     "analytics_tmdb_signal": { "owner": "p5", "dashboard": "D5" }
+  },
+  "data_views": {
+    "dv_d1_timeseries": { "alias": "analytics_timeseries", "time_field": null },
+    "dv_d1_top_movies": { "alias": "analytics_top_movies", "time_field": null },
+    "dv_d2_movie_timeseries": { "alias": "analytics_timeseries", "time_field": "period_start" },
+    "dv_d3_genre_trends": { "alias": "analytics_genre_trends", "time_field": "period_start" },
+    "dv_d4_growth_current": { "alias": "analytics_growth_current", "time_field": null },
+    "dv_d4_growth_history": { "alias": "analytics_growth", "time_field": "window_start" },
+    "dv_d5_tmdb_signal": { "alias": "analytics_tmdb_signal", "time_field": null }
   },
   "batch_publication_aliases": [
     "movie_batch_stats",
@@ -32,5 +45,9 @@
     "analytics_timeseries",
     "analytics_top_movies",
     "analytics_genre_trends"
+  ],
+  "versioned_publication_aliases": [
+    "analytics_growth_current",
+    "analytics_tmdb_signal"
   ]
 }
