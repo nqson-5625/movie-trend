@@ -1,0 +1,1 @@
+"""Shared Kibana infrastructure helpers."""
