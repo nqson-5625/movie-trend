@@ -1,4 +1,4 @@
-"""Kiểm tra READY report P2/P3, công bố đồng thời 6 Batch aliases và rollback."""
+"""READY validation and atomic publishers for Batch and versioned analytics."""
 
 from .batch_publisher import (
     PublicationError,
