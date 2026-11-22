@@ -49,7 +49,7 @@
     "indices": [
       {
         "names": ["movie_batch_stats*", "movie_daily_stats*", "genre_trends*", "analytics_*"] ,
-        "privileges": ["manage_aliases", "read", "view_index_metadata"]
+        "privileges": ["read", "view_index_metadata"]
       }
     ]
   },
