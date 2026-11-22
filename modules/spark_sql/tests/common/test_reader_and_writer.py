@@ -20,6 +20,8 @@ from modules.spark_sql.common.runtime.spark_session import create_spark_sql_sess
 from modules.spark_sql.common.writers.analytics_writer import (
     ANALYTICS_KEY_COLUMNS,
     prepare_analytics_records,
+    validate_analytics_dataframe,
+    validate_physical_target,
     write_analytics_df,
 )
 from modules.spark_sql.common.writers.key_serializer import serialize_key_v1
@@ -153,6 +155,29 @@ def test_prepare_analytics_records_rejects_duplicate_keys_and_write_is_idempoten
     assert fake_es.bulk_calls[0][1][0]["_id"] == fake_es.bulk_calls[1][1][0]["_id"]
 
 
+def test_tmdb_family_uses_literal_id_and_versioned_physical_target(spark) -> None:
+    df = spark.sql("""
+        SELECT
+            CAST(550 AS INT) AS tmdbId,
+            'phase2-3.0' AS schema_version,
+            'run001' AS analytics_run_id,
+            TIMESTAMP '2026-11-22T08:00:00Z' AS published_at,
+            'tmdb' AS source
+    """)
+    validate_analytics_dataframe(df, "analytics_tmdb_signal")
+    records = prepare_analytics_records(
+        df,
+        ANALYTICS_KEY_COLUMNS["analytics_tmdb_signal"],
+        analytics_family="analytics_tmdb_signal",
+    )
+    assert records[0]["_id"] == "550"
+    assert validate_physical_target(
+        "analytics_tmdb_signal-vrun001", "analytics_tmdb_signal"
+    ) == "analytics_tmdb_signal-vrun001"
+    with pytest.raises(ValueError, match="physical index"):
+        validate_physical_target("analytics_tmdb_signal", "analytics_tmdb_signal")
+
+
 @pytest.mark.skipif(os.environ.get("ES_LIVE_TEST") != "1", reason="Đặt ES_LIVE_TEST=1 để chạy test live")
 def test_live_es_to_spark_sql_to_es_analytics_roundtrip(spark) -> None:
     p5 = ESClient(owner="p5")
@@ -194,7 +219,10 @@ def test_live_es_to_spark_sql_to_es_analytics_roundtrip(spark) -> None:
                 tmdbId, event_time, popularity, vote_count, vote_average,
                 prev_popularity, popularity_delta, updated_at,
                 CAST(NULL AS STRING) AS title,
-                'tmdb' AS source
+                'tmdb' AS source,
+                'phase2-3.0' AS schema_version,
+                'live-test' AS analytics_run_id,
+                TIMESTAMP '2026-11-22T08:00:00Z' AS published_at
             FROM tmdb_rt
         """)
 
@@ -202,10 +230,12 @@ def test_live_es_to_spark_sql_to_es_analytics_roundtrip(spark) -> None:
         res1 = write_analytics_df(
             analytics_df, out_idx, ANALYTICS_KEY_COLUMNS["analytics_tmdb_signal"],
             owner="p5", client=p5, refresh=True,
+            analytics_family="analytics_tmdb_signal",
         )
         res2 = write_analytics_df(
             analytics_df, out_idx, ANALYTICS_KEY_COLUMNS["analytics_tmdb_signal"],
             owner="p5", client=p5, refresh=True,
+            analytics_family="analytics_tmdb_signal",
         )
         assert res1.succeeded_count == 2
         assert res2.succeeded_count == 2
