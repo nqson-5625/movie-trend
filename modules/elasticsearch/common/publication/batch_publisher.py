@@ -227,6 +227,16 @@ def publish_batch_aliases(
         }
         if mismatches:
             raise PublicationError(f"Ánh xạ alias sau chuyển không khớp: {mismatches!r}")
+        search_smokes = {
+            alias: client.search_smoke(alias) for alias in target_map
+        }
+        smoke_mismatches = {
+            alias: {"expected": entries[alias].row_count, "actual": smoke["count_seen"]}
+            for alias, smoke in search_smokes.items()
+            if smoke["count_seen"] != entries[alias].row_count
+        }
+        if smoke_mismatches:
+            raise PublicationError(f"Search smoke sau publish không khớp: {smoke_mismatches!r}")
     except (RuntimeError, PublicationError) as exc:
         _atomic_write_json(
             marker_file,
@@ -281,6 +291,7 @@ def publish_batch_aliases(
         "manifest_sha256": p2_report.manifest_sha256,
         "aliases": target_map,
         "published_at": published_at,
+        "search_smokes": search_smokes,
     }
     _atomic_write_json(marker_file, marker_payload)
 

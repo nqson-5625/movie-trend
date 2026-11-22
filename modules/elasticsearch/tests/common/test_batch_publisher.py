@@ -30,7 +30,7 @@ def _make_reports(run_id: str = "20261024T104145Z") -> tuple[ReadyReport, ReadyR
     run_suffix = run_id.lower()
     p2 = ReadyReport(
         owner="P2",
-        schema_version="phase2-2.2",
+        schema_version="phase2-3.0",
         manifest_sha256="a" * 64,
         batch_run_id=run_id,
         batch_cutoff_time="2018-10-01T00:00:00Z",
@@ -47,7 +47,7 @@ def _make_reports(run_id: str = "20261024T104145Z") -> tuple[ReadyReport, ReadyR
     )
     p3 = ReadyReport(
         owner="P3",
-        schema_version="phase2-2.2",
+        schema_version="phase2-3.0",
         manifest_sha256="a" * 64,
         batch_run_id=run_id,
         batch_cutoff_time="2018-10-01T00:00:00Z",
@@ -90,6 +90,14 @@ class _FakeESForPublisher:
 
     def count(self, name: str) -> int:
         return self.counts[name]
+
+    def search_smoke(self, name: str) -> Dict[str, Any]:
+        indices = self.alias_to_indices.get(name, [name])
+        return {
+            "index_or_alias": name,
+            "searchable": True,
+            "count_seen": sum(self.counts[index] for index in indices),
+        }
 
     def search(self, name: str, body: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -291,7 +299,7 @@ def test_live_6_alias_atomic_publish_swap_and_rollback(tmp_path: Path) -> None:
 
         p2_rep = ReadyReport(
             owner="P2",
-            schema_version="phase2-2.2",
+            schema_version="phase2-3.0",
             manifest_sha256="b" * 64,
             batch_run_id=run_id,
             batch_cutoff_time="2018-10-01T00:00:00Z",
@@ -303,7 +311,7 @@ def test_live_6_alias_atomic_publish_swap_and_rollback(tmp_path: Path) -> None:
         )
         p3_rep = ReadyReport(
             owner="P3",
-            schema_version="phase2-2.2",
+            schema_version="phase2-3.0",
             manifest_sha256="b" * 64,
             batch_run_id=run_id,
             batch_cutoff_time="2018-10-01T00:00:00Z",

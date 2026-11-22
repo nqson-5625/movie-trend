@@ -144,12 +144,18 @@ def validate_ready_reports_pair(
     expected_aliases: Sequence[str] = DEFAULT_BATCH_ALIASES,
 ) -> Dict[str, IndexReadyEntry]:
     """Đối soát P2 và P3 cùng run_id, T, ref_version, manifest_sha256 và đủ 6 bảng Batch."""
+    expected_schema_version = str(load_runtime_config()["schema_version"])
     for label, report in (("P2", p2_report), ("P3", p3_report)):
         if report.status != "READY":
             raise ValueError(f"Báo cáo {label} phải có status='READY', nhận được {report.status!r}")
         if report.sql_test_result != "PASS":
             raise ValueError(
                 f"Báo cáo {label} phải có sql_test_result='PASS', nhận được {report.sql_test_result!r}"
+            )
+        if report.schema_version != expected_schema_version:
+            raise ValueError(
+                f"Báo cáo {label} dùng schema_version={report.schema_version!r}; "
+                f"runtime yêu cầu {expected_schema_version!r}"
             )
         for attr in (
             "owner",
