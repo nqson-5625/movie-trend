@@ -11,13 +11,15 @@ P2_REPORT ?= $(REPORTS_DIR)/p2_ready_$(RUN_ID).json
 P3_REPORT ?= $(REPORTS_DIR)/p3_ready_$(RUN_ID).json
 SNAPSHOT ?= $(REPORTS_DIR)/rollback_snapshot_$(RUN_ID).json
 
-.PHONY: help up down status logs forward clean init-templates health test test-live publish-dry publish rollback
+.PHONY: help up down status logs forward clean validate init-templates init-roles health test test-live publish-dry publish rollback
 
 help:
 	@echo "Module 06 - Elasticsearch (k3s namespace: $(NAMESPACE))"
 	@echo "  make -C modules/elasticsearch up              Trien khai ES va cho Ready"
 	@echo "  make -C modules/elasticsearch forward         Mo cong 127.0.0.1:9200"
 	@echo "  make -C modules/elasticsearch init-templates  Cai dat Component & Index Templates"
+	@echo "  make -C modules/elasticsearch init-roles      Cai dat Phase 2 least-privilege roles"
+	@echo "  make -C modules/elasticsearch validate        Kiem tra inventory Phase2-3.0"
 	@echo "  make -C modules/elasticsearch health          Kiem tra suc khoe ES & templates"
 	@echo "  make -C modules/elasticsearch test            Chay unit test offline"
 	@echo "  make -C modules/elasticsearch test-live       Chay tat ca test (can port-forward 9200)"
@@ -30,6 +32,8 @@ help:
 	@echo "  make -C modules/elasticsearch clean           Xoa sach ES va ca PVC du lieu"
 
 up:
+	@kubectl get secret elasticsearch-credentials -n $(NAMESPACE) >/dev/null || \
+	  (echo "Thieu secret elasticsearch-credentials/elastic-password trong namespace $(NAMESPACE)"; exit 1)
 	kubectl apply -f $(K8S_DIR)/01-elasticsearch-config.yaml
 	kubectl apply -f $(K8S_DIR)/02-elasticsearch-statefulset.yaml
 	kubectl wait -n $(NAMESPACE) --for=condition=ready pod/$(ES_POD) --timeout=180s
@@ -53,6 +57,12 @@ clean: down
 
 init-templates:
 	cd "$(PROJECT_ROOT)" && "$(PYTHON)" modules/elasticsearch/common/templates/apply_templates.py
+
+init-roles:
+	cd "$(PROJECT_ROOT)" && "$(PYTHON)" -m modules.elasticsearch.common.roles.apply_roles
+
+validate:
+	cd "$(PROJECT_ROOT)" && "$(PYTHON)" -c 'from modules.elasticsearch.common.config.runtime_contract import validate_runtime_contract; print(validate_runtime_contract())'
 
 health:
 	cd "$(PROJECT_ROOT)" && "$(PYTHON)" -m modules.elasticsearch.common.config.health_check \

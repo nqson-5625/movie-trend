@@ -11,14 +11,18 @@ from typing import Any, Dict, List
 
 from .es_client import ESClient, load_runtime_config
 
+TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "lanes"
+
 REQUIRED_COMPONENTS = (
     "movie_trend_base_settings",
     "movie_trend_batch_meta",
+    "movie_trend_analytics_meta",
+    "movie_trend_growth_current_meta",
 )
 
 
 def run_health_check(client: ESClient) -> Dict[str, Any]:
-    """Kiểm tra health cluster, version ES, 2 component template dùng chung và liệt kê index templates."""
+    """Kiểm tra health cluster, version ES, required components và index templates."""
     contract = load_runtime_config()
     expected_prefix = ".".join(contract["elasticsearch_version"].split(".")[:2]) + "."
 
@@ -27,7 +31,7 @@ def run_health_check(client: ESClient) -> Dict[str, Any]:
     version = str(info.get("version", {}).get("number", ""))
     status = str(health.get("status", "unknown"))
 
-    # Kiểm tra 2 Component Template dùng chung đã tồn tại chưa
+    # Kiểm tra toàn bộ Component Template dùng chung đã tồn tại chưa
     missing_components: List[str] = []
     for name in REQUIRED_COMPONENTS:
         resp = client._request("GET", f"/_component_template/{name}", expected_statuses=(200, 404))
@@ -48,10 +52,16 @@ def run_health_check(client: ESClient) -> Dict[str, Any]:
     else:
         installed_templates = []
 
+    expected_index_templates = sorted(
+        f"movie_trend_{path.stem}" for path in TEMPLATES_DIR.glob("*/templates/*.json")
+    )
+    missing_index_templates = sorted(set(expected_index_templates) - set(installed_templates))
+
     ok = (
         status in ("green", "yellow")
         and version.startswith(expected_prefix)
         and len(missing_components) == 0
+        and len(missing_index_templates) == 0
     )
 
     return {
@@ -63,6 +73,7 @@ def run_health_check(client: ESClient) -> Dict[str, Any]:
         "number_of_nodes": health.get("number_of_nodes"),
         "missing_components": missing_components,
         "installed_index_templates": installed_templates,
+        "missing_index_templates": missing_index_templates,
         "ok": ok,
     }
 
