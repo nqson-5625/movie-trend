@@ -183,6 +183,7 @@ def test_tmdb_realtime_delta(spark):
     assert len(rows) == 1
     row = rows[0]
     assert row["tmdbId"] == 550
+    assert row["title"] == "Fight Club"
     assert row["popularity"] == 125.5
     assert row["prev_popularity"] == 100.0
     assert row["popularity_delta"] == 25.5
