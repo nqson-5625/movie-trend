@@ -19,7 +19,7 @@ endif
 
 KAFKA_PACKAGE ?= org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
 KAFKA_BOOTSTRAP ?= 127.0.0.1:9092
-ES_URL ?= http://localhost:9200
+ES_URL ?= http://127.0.0.1:9200
 NAMESPACE ?= bigdata
 K8S_MANIFEST := $(MODULE_DIR)/k8s/01-spark-streaming.yaml
 

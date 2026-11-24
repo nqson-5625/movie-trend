@@ -300,7 +300,7 @@ def main() -> None:
         "--checkpoint-root",
         default=os.environ.get("SPARK_CHECKPOINT_ROOT", str(PROJECT_ROOT / "data" / "test_data" / "ckpt")),
     )
-    parser.add_argument("--es-url", default=os.environ.get("ES_HTTP_URL", "http://localhost:9200"))
+    parser.add_argument("--es-url", default=os.environ.get("ES_HTTP_URL", "http://127.0.0.1:9200"))
     parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "data" / "test_data"))
     args = parser.parse_args()
 

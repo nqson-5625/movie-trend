@@ -14,6 +14,12 @@
     "mappings": {
       "properties": {
         "tmdbId": { "type": "integer" },
+        "title": {
+          "type": "text",
+          "fields": {
+            "keyword": { "type": "keyword", "ignore_above": 512 }
+          }
+        },
         "event_time": { "type": "date", "format": "strict_date_optional_time||strict_date" },
         "popularity": { "type": "double" },
         "vote_count": { "type": "long" },

@@ -284,6 +284,7 @@ def compute_tmdb_realtime(raw_tmdb_df: DataFrame) -> Tuple[DataFrame, DataFrame]
         .select(
             "doc_id",
             "tmdbId",
+            "title",
             "event_time",
             "popularity",
             "vote_count",
