@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -17,7 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 TEST_DATA_DIR = PROJECT_ROOT / "data" / "test_data"
 
-from ..src.es_sink import merge_window_stats
+from modules.elasticsearch.common.config.es_client import BulkItemError, BulkResult, ESClient
+
+from ..src import es_sink
+from ..src.es_sink import bulk_upsert_elasticsearch, merge_window_stats
 from ..src.streaming_job import create_spark_session, run_sample_mode
 from ..src.transforms import (
     compute_genre_realtime,
@@ -265,4 +269,103 @@ def test_multi_batch_window_accumulation(spark):
     assert doc["rating_count"] == 3
     assert doc["rating_sum"] == 12.0
     assert doc["avg_rating"] == 4.0
+def test_bulk_upsert_elasticsearch_uses_spark_streaming_owner(monkeypatch, caplog):
+    """Kiểm tra bulk_upsert_elasticsearch khởi tạo ESClient với owner='spark_streaming' và trả về succeeded_count."""
+    captured = {}
 
+    class DummySession:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeESClient:
+        def __init__(self, owner, base_url, timeout):
+            captured["init"] = {"owner": owner, "base_url": base_url, "timeout": timeout}
+            self._session = DummySession()
+            captured["session"] = self._session
+
+        def bulk_upsert(self, index_name, records, id_field, raise_on_error):
+            captured["call"] = {
+                "index_name": index_name,
+                "records": list(records),
+                "id_field": id_field,
+                "raise_on_error": raise_on_error,
+            }
+            return BulkResult(
+                index_name=index_name,
+                total_sent=2,
+                succeeded_count=1,
+                failed_count=1,
+                errors=[BulkItemError(index_name, "551", 400, "mapper_parsing_exception", "bad field")],
+            )
+
+    monkeypatch.setattr(es_sink, "ESClient", FakeESClient)
+    records = [
+        {"doc_id": "550", "tmdbId": 550, "title": "Fight Club"},
+        {"doc_id": "551", "tmdbId": 551, "title": "Bad Doc"},
+    ]
+    count = bulk_upsert_elasticsearch("http://127.0.0.1:9200", "tmdb_realtime", records, timeout=15)
+
+    assert count == 1
+    assert captured["init"] == {
+        "owner": "spark_streaming",
+        "base_url": "http://127.0.0.1:9200",
+        "timeout": 15.0,
+    }
+    assert captured["call"]["index_name"] == "tmdb_realtime"
+    assert captured["call"]["id_field"] == "doc_id"
+    assert captured["call"]["raise_on_error"] is False
+    assert captured["call"]["records"] == records
+    assert captured["session"].closed is True
+    assert "lỗi 1/2 bản ghi" in caplog.text
+
+
+def test_bulk_upsert_elasticsearch_rejects_unauthorized_index():
+    """Kiểm tra owner='spark_streaming' bị chặn khi ghi vào index ngoài danh sách cho phép."""
+    client = ESClient(
+        owner="spark_streaming",
+        base_url="http://127.0.0.1:9200",
+        username="elastic",
+        password="elastic",
+    )
+    with pytest.raises(PermissionError):
+        bulk_upsert_elasticsearch(
+            "http://127.0.0.1:9200",
+            "analytics_tmdb_signal",
+            [{"doc_id": "550", "tmdbId": 550}],
+            client=client,
+        )
+
+
+def test_bulk_upsert_elasticsearch_connection_error_returns_zero(monkeypatch, caplog):
+    """Kiểm tra lỗi kết nối mạng/ES trả về 0 và ghi warning thay vì làm crash job."""
+    client = ESClient(
+        owner="spark_streaming",
+        base_url="http://127.0.0.1:9200",
+        username="elastic",
+        password="elastic",
+    )
+
+    def fail_bulk(*args, **kwargs):
+        raise requests.ConnectionError("connection refused")
+
+    monkeypatch.setattr(client, "bulk_upsert", fail_bulk)
+    count = bulk_upsert_elasticsearch(
+        "http://127.0.0.1:9200",
+        "tmdb_realtime",
+        [{"doc_id": "550", "tmdbId": 550}],
+        client=client,
+    )
+    assert count == 0
+    assert "Không đẩy được dữ liệu lên Elasticsearch" in caplog.text
+
+
+def test_bulk_upsert_elasticsearch_empty_records_skips_client(monkeypatch):
+    """Kiểm tra records rỗng trả về 0 và không khởi tạo ESClient."""
+    def fail_init(*args, **kwargs):
+        raise AssertionError("ESClient should not be constructed for empty records")
+
+    monkeypatch.setattr(es_sink, "ESClient", fail_init)
+    assert bulk_upsert_elasticsearch("http://127.0.0.1:9200", "tmdb_realtime", []) == 0

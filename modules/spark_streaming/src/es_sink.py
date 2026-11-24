@@ -6,10 +6,17 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.error
-import urllib.request
+import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
+
+import requests
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from modules.elasticsearch.common.config.es_client import ESClient
 
 logger = logging.getLogger("SparkSpeedLayer")
 
@@ -20,44 +27,54 @@ def bulk_upsert_elasticsearch(
     records: Iterable[Dict[str, Any]],
     id_field: str = "doc_id",
     timeout: int = 10,
+    owner: str = "spark_streaming",
+    client: Optional[ESClient] = None,
 ) -> int:
     """
-    Gửi request POST /_bulk lên Elasticsearch với action 'index' (upsert theo _id).
-    Loại bỏ trường id_field khỏi body document trước khi lưu để khớp 100% schema DATA_CONTRACT.md.
+    Gửi request POST /_bulk lên Elasticsearch thông qua ESClient dùng chung (owner='spark_streaming').
+    Tự động đọc ES_USERNAME / ES_PASSWORD từ .env (mặc định tài khoản elastic),
+    retry lỗi tạm thời và loại bỏ id_field khỏi body document trước khi lưu.
     """
-    lines: List[str] = []
-    count = 0
-    for rec in records:
-        doc = dict(rec)
-        doc_id = str(doc.pop(id_field))
-        meta = json.dumps({"index": {"_index": index_name, "_id": doc_id}})
-        payload = json.dumps(doc, ensure_ascii=False)
-        lines.append(meta)
-        lines.append(payload)
-        count += 1
-
-    if count == 0:
+    rec_list = list(records)
+    if not rec_list:
         return 0
 
-    body = ("\n".join(lines) + "\n").encode("utf-8")
-    url = f"{es_http_url.rstrip('/')}/_bulk"
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/x-ndjson"},
-        method="POST",
-    )
+    created_client = client is None
+    es_client: Optional[ESClient] = client
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            resp_body = json.loads(resp.read().decode("utf-8"))
-            if resp_body.get("errors"):
-                logger.warning(f"Elasticsearch bulk upsert vào {index_name} có lỗi một phần.")
-            return count
-    except urllib.error.URLError as e:
+        if es_client is None:
+            es_client = ESClient(
+                owner=owner,
+                base_url=es_http_url,
+                timeout=float(timeout),
+            )
+        result = es_client.bulk_upsert(
+            index_name=index_name,
+            records=rec_list,
+            id_field=id_field,
+            raise_on_error=False,
+        )
+        if result.failed_count > 0:
+            preview = "; ".join(
+                f"_id={e.doc_id} ({e.status} {e.error_type}: {e.reason})"
+                for e in result.errors[:5]
+            )
+            logger.warning(
+                f"Elasticsearch bulk upsert vào {index_name} lỗi {result.failed_count}/"
+                f"{result.total_sent} bản ghi [{preview}]."
+            )
+        return result.succeeded_count
+    except (requests.RequestException, RuntimeError) as e:
         logger.warning(
-            f"Không kết nối được Elasticsearch ({url}): {e}. Dữ liệu vẫn được lưu ở local output."
+            f"Không đẩy được dữ liệu lên Elasticsearch ({es_http_url}, index={index_name}): {e}. "
+            "Dữ liệu vẫn được lưu ở local output."
         )
         return 0
+    finally:
+        if created_client and es_client is not None:
+            session = getattr(es_client, "_session", None)
+            if session is not None:
+                session.close()
 
 
 def merge_window_stats(
