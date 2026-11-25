@@ -242,6 +242,19 @@ def test_fixture_top_movies_rank_every_movie_with_tie_break(period_type):
     assert {r["period_type"] for r in fixture("analytics_top_movies")} == {"month", "year", "all"}
 
 
+@pytest.mark.parametrize("family", FAMILIES)
+def test_fixture_loader_ids_use_contract_keys_with_date_types(family):
+    from modules.elasticsearch.lanes.movie_batch.load_fixtures import FAMILY_KEYS, build_records
+    assert FAMILY_KEYS[family] == KEYS[family]
+    rows = fixture(family)
+    records = build_records(family, rows)
+    assert [{k: v for k, v in r.items() if k != "_id"} for r in records] == rows
+    for row, rec in zip(rows, records):
+        typed = {k: date.fromisoformat(row[k]) if k in ("date", "period_start") and row[k] else row.get(k)
+                 for k in KEYS[family]}
+        assert rec["_id"] == build_record_id(typed, KEYS[family])
+
+
 def test_fixture_top_movies_contains_ties():
     groups = defaultdict(list)
     for r in fixture("analytics_top_movies"):
