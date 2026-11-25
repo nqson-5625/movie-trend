@@ -1,0 +1,33 @@
+{
+  "index_patterns": [
+    "movie_batch_stats",
+    "movie_batch_stats_*",
+    "dev_p2_movie_batch_stats*",
+    "dev_p3_movie_batch_stats*",
+    "dev_p4_movie_batch_stats*",
+    "dev_p5_movie_batch_stats*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings",
+    "movie_trend_batch_meta"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "movieId": { "type": "integer" },
+        "title": {
+          "type": "text",
+          "fields": {
+            "keyword": { "type": "keyword", "ignore_above": 512 }
+          }
+        },
+        "total_count": { "type": "long" },
+        "rating_count": { "type": "long" },
+        "rating_sum": { "type": "double" },
+        "avg_rating": { "type": "double" },
+        "generated_at": { "type": "date", "format": "strict_date_optional_time||strict_date" }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "index_patterns": [
+    "analytics_top_movies",
+    "analytics_top_movies_*",
+    "dev_p2_analytics_top_movies*",
+    "dev_p3_analytics_top_movies*",
+    "dev_p4_analytics_top_movies*",
+    "dev_p5_analytics_top_movies*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings",
+    "movie_trend_batch_meta",
+    "movie_trend_analytics_meta"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "ref_version": { "type": "keyword" },
+        "manifest_hash": { "type": "keyword" },
+        "period_type": { "type": "keyword" },
+        "period_start": { "type": "date", "format": "strict_date" },
+        "movieId": { "type": "integer" },
+        "title": {
+          "type": "text",
+          "fields": {
+            "keyword": { "type": "keyword", "ignore_above": 512 }
+          }
+        },
+        "interaction_count": { "type": "long" },
+        "rating_count": { "type": "long" },
+        "rating_sum": { "type": "double" },
+        "avg_rating": { "type": "double" },
+        "rank_in_period": { "type": "integer" }
+      }
+    }
+  }
+}
