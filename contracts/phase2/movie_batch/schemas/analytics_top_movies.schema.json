@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "analytics_top_movies document (Phase2-3.0, P2; dùng cho Top 10 của D1)",
+  "description": "Grain (batch_run_id, period_type, period_start, movieId). Lưu đủ mọi phim trong kỳ; rank_in_period = row_number theo interaction_count giảm dần, hòa thì movieId tăng dần. Panel tự lọc rank_in_period <= 10.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "analytics_run_id",
+    "published_at",
+    "batch_run_id",
+    "batch_cutoff_time",
+    "ref_version",
+    "manifest_hash",
+    "period_type",
+    "period_start",
+    "movieId",
+    "title",
+    "interaction_count",
+    "rating_count",
+    "rating_sum",
+    "avg_rating",
+    "rank_in_period"
+  ],
+  "properties": {
+    "schema_version": { "const": "phase2-3.0" },
+    "analytics_run_id": { "type": "string", "minLength": 1 },
+    "published_at": { "$ref": "#/$defs/utcTimestamp" },
+    "batch_run_id": { "type": "string", "minLength": 1 },
+    "batch_cutoff_time": { "$ref": "#/$defs/utcTimestamp" },
+    "ref_version": { "type": "string", "minLength": 1 },
+    "manifest_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "period_type": { "enum": ["month", "year", "all"] },
+    "period_start": {
+      "anyOf": [{ "$ref": "#/$defs/utcDate" }, { "type": "null" }]
+    },
+    "movieId": { "type": "integer", "minimum": 1 },
+    "title": { "type": ["string", "null"] },
+    "interaction_count": { "type": "integer", "minimum": 1 },
+    "rating_count": { "type": "integer", "minimum": 1 },
+    "rating_sum": { "type": "number", "minimum": 0.5 },
+    "avg_rating": { "type": "number", "minimum": 0.5, "maximum": 5.0 },
+    "rank_in_period": { "type": "integer", "minimum": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "period_type": { "const": "all" } } },
+      "then": { "properties": { "period_start": { "type": "null" } } },
+      "else": {
+        "properties": { "period_start": { "$ref": "#/$defs/utcDate" } }
+      }
+    }
+  ],
+  "$defs": {
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "utcDate": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    }
+  }
+}

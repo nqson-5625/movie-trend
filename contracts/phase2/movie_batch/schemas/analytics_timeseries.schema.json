@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "analytics_timeseries document (Phase2-3.0, P2; dùng cho D1 và D2)",
+  "description": "Grain (batch_run_id, period_type, period_start, entity_type, movieId). entity_type=all phục vụ D1 (KPI + timeline), entity_type=movie phục vụ D2. period_type=all có period_start=null. avg_rating = rating_sum / rating_count trong đúng grain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "analytics_run_id", "published_at",
+    "batch_run_id", "batch_cutoff_time", "ref_version", "manifest_hash",
+    "period_type", "period_start", "entity_type", "movieId", "title",
+    "interaction_count", "rating_count", "rating_sum", "avg_rating", "distinct_movie_count"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase2-3.0"},
+    "analytics_run_id": {"type": "string", "minLength": 1},
+    "published_at": {"$ref": "#/$defs/utcTimestamp"},
+    "batch_run_id": {"type": "string", "minLength": 1},
+    "batch_cutoff_time": {"$ref": "#/$defs/utcTimestamp"},
+    "ref_version": {"type": "string", "minLength": 1},
+    "manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "period_type": {"enum": ["day", "month", "year", "all"]},
+    "period_start": {"anyOf": [{"$ref": "#/$defs/utcDate"}, {"type": "null"}]},
+    "entity_type": {"enum": ["movie", "all"]},
+    "movieId": {"type": ["integer", "null"], "minimum": 1},
+    "title": {"type": ["string", "null"]},
+    "interaction_count": {"type": "integer", "minimum": 1},
+    "rating_count": {"type": "integer", "minimum": 1},
+    "rating_sum": {"type": "number", "minimum": 0.5},
+    "avg_rating": {"type": "number", "minimum": 0.5, "maximum": 5.0},
+    "distinct_movie_count": {"type": ["integer", "null"], "minimum": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"period_type": {"const": "all"}}},
+      "then": {"properties": {"period_start": {"type": "null"}}},
+      "else": {"properties": {"period_start": {"$ref": "#/$defs/utcDate"}}}
+    },
+    {
+      "if": {"properties": {"entity_type": {"const": "all"}}},
+      "then": {"properties": {"movieId": {"type": "null"}, "title": {"type": "null"}, "distinct_movie_count": {"type": "integer"}}},
+      "else": {"properties": {"movieId": {"type": "integer"}, "distinct_movie_count": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "utcTimestamp": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "utcDate": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+  }
+}
