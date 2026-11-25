@@ -63,7 +63,27 @@ Dữ liệu gốc: 4 phim (1, 2, 3 và 99 không có title), 4 ngày, **12 ratin
 .venv/bin/python -m pytest modules/elasticsearch/tests/lanes -q           # template + schema + fixture
 ```
 
-Lệnh nạp fixture vào index dev `dev_p2_*` sẽ được bổ sung cùng loader của lane.
+### Nạp fixture vào Elasticsearch local (để dựng/thử D1, D2)
+
+Cần ES đang chạy theo `modules/elasticsearch/Huong_dan.md` (Secret + `.env` có `ES_*`, `make up`, `make forward`).
+
+```bash
+PYTHONPATH=. make -C modules/elasticsearch init-templates   # cài template (gồm 4 template của lane này)
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.load_fixtures --replace
+```
+
+Kết quả: `dev_p2_movie_batch_stats` 4, `dev_p2_movie_daily_stats` 9, `dev_p2_analytics_timeseries` 36,
+`dev_p2_analytics_top_movies` 18 document. Loader từ chối ghi nếu template chưa được cài; chạy lại không nhân đôi
+(ghi đè theo `_id`). Fixture chỉ nằm trong namespace dev, không gắn vào alias chính (contract mục 4, 9).
+
+Truy vấn mẫu đúng cách D1/D2 đọc:
+
+| Dùng cho | Index | Lọc |
+| --- | --- | --- |
+| D1 · KPI toàn thời gian | `dev_p2_analytics_timeseries` | `entity_type=all` và `period_type=all` (đúng 1 dòng, `period_start=null`) |
+| D1 · Timeline | `dev_p2_analytics_timeseries` | `entity_type=all` và đúng một `period_type` (vd. `month`) |
+| D1 · Top 10 | `dev_p2_analytics_top_movies` | đúng một `period_type` (+ một `period_start` nếu month/year) và `rank_in_period <= 10` |
+| D2 · Xu hướng 1–3 phim | `dev_p2_analytics_timeseries` | `entity_type=movie`, đúng một `period_type`, `movieId` ∈ 1–3 phim |
 
 ## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
 
