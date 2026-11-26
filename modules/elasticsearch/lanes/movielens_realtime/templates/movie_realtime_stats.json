@@ -1,0 +1,49 @@
+{
+  "index_patterns": [
+    "movie_realtime_stats",
+    "dev_p2_movie_realtime_stats*",
+    "dev_p3_movie_realtime_stats*",
+    "dev_p4_movie_realtime_stats*",
+    "dev_p5_movie_realtime_stats*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "window_start": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "window_end": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "window_size": {
+          "type": "keyword"
+        },
+        "movieId": {
+          "type": "integer"
+        },
+        "interaction_count": {
+          "type": "long"
+        },
+        "rating_count": {
+          "type": "long"
+        },
+        "rating_sum": {
+          "type": "double"
+        },
+        "avg_rating": {
+          "type": "double"
+        },
+        "updated_at": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        }
+      }
+    }
+  }
+}

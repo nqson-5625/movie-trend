@@ -1,0 +1,49 @@
+{
+  "index_patterns": [
+    "genre_realtime",
+    "dev_p2_genre_realtime*",
+    "dev_p3_genre_realtime*",
+    "dev_p4_genre_realtime*",
+    "dev_p5_genre_realtime*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "window_start": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "window_end": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "window_size": {
+          "type": "keyword"
+        },
+        "genre": {
+          "type": "keyword"
+        },
+        "interaction_count": {
+          "type": "long"
+        },
+        "rating_count": {
+          "type": "long"
+        },
+        "rating_sum": {
+          "type": "double"
+        },
+        "avg_rating": {
+          "type": "double"
+        },
+        "updated_at": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        }
+      }
+    }
+  }
+}
