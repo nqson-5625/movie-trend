@@ -1,0 +1,4 @@
+{"avg_rating": 4.0, "batch_cutoff_time": "2018-03-01T00:00:00Z", "batch_run_id": "fixture-p2-v1", "generated_at": "2026-11-24T00:00:00Z", "movieId": 1, "rating_count": 4, "rating_sum": 16.0, "title": "Toy Story (1995)", "total_count": 4}
+{"avg_rating": 4.0, "batch_cutoff_time": "2018-03-01T00:00:00Z", "batch_run_id": "fixture-p2-v1", "generated_at": "2026-11-24T00:00:00Z", "movieId": 2, "rating_count": 4, "rating_sum": 16.0, "title": "Jumanji (1995)", "total_count": 4}
+{"avg_rating": 3.1666666666666665, "batch_cutoff_time": "2018-03-01T00:00:00Z", "batch_run_id": "fixture-p2-v1", "generated_at": "2026-11-24T00:00:00Z", "movieId": 3, "rating_count": 3, "rating_sum": 9.5, "title": "Grumpier Old Men (1995)", "total_count": 3}
+{"avg_rating": 2.5, "batch_cutoff_time": "2018-03-01T00:00:00Z", "batch_run_id": "fixture-p2-v1", "generated_at": "2026-11-24T00:00:00Z", "movieId": 99, "rating_count": 1, "rating_sum": 2.5, "title": null, "total_count": 1}

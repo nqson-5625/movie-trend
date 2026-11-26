@@ -1,0 +1,97 @@
+# Lane `movie_batch` (P2) — schema và fixture
+
+| | |
+| --- | --- |
+| Contract | `DATA_CONTRACT_Phase2.md` bản **Phase2-3.0** (mục 4, 5, 6.1, 9); `schema_version = phase2-3.0` |
+| Owner | P2 — Đỗ Sơn |
+| Consumer | P1 (D1: `analytics_timeseries` dòng `entity_type=all`, `analytics_top_movies`), P2 (D2: `analytics_timeseries` dòng `entity_type=movie`) |
+| Fixture `generated_at` | `2026-11-24T00:00:00Z` |
+| Nhãn | **FIXTURE** — dữ liệu dựng tay để phát triển song song, **không phải** kết quả MapReduce thật. `batch_run_id = fixture-p2-v1` |
+
+Index template tương ứng nằm ở `modules/elasticsearch/lanes/movie_batch/templates/`.
+
+## Bốn bảng của lane
+
+| Bảng | Loại | Grain / `_id` (`serialize_key_v1`) | Nguồn |
+| --- | --- | --- | --- |
+| `movie_batch_stats` | source | `(batch_run_id, movieId)` | `movie_stats.tsv` của Module 04 |
+| `movie_daily_stats` | source | `(batch_run_id, date, movieId)` | `movie_daily_stats.tsv` của Module 04 (không có `title`) |
+| `analytics_timeseries` | analytics | `(batch_run_id, period_type, period_start, entity_type, movieId)` | Spark SQL từ hai source |
+| `analytics_top_movies` | analytics | `(batch_run_id, period_type, period_start, movieId)` | Spark SQL từ hai source |
+
+- `analytics_timeseries`: `period_type` ∈ day/month/year/all × `entity_type` ∈ movie/all. Kỳ `all` có
+  `period_start = null`; dòng `entity_type=all` có `movieId = title = null` và `distinct_movie_count`;
+  dòng `entity_type=movie` có `distinct_movie_count = null`.
+- `analytics_top_movies`: `period_type` ∈ month/year/all, lưu **đủ mọi phim** trong kỳ;
+  `rank_in_period` = row_number theo `interaction_count` giảm dần, hòa thì `movieId` tăng dần. Panel tự lọc `<= 10`.
+- Mọi kỳ: `avg_rating = rating_sum / rating_count` tính trên đúng grain (không average-of-averages).
+- Khi tạo `_id`, `date`/`period_start` phải là kiểu ngày (không phải chuỗi) để khớp writer Spark dùng chung.
+
+## Thư mục
+
+```text
+contracts/phase2/movie_batch/
+├── README.md
+├── build_fixtures.py        sinh fixtures/ từ bảng ngày viết tay (nguồn sự thật duy nhất)
+├── schemas/                 JSON Schema Draft 2020-12 cho từng bảng (additionalProperties=false)
+└── fixtures/
+    ├── manifest.json        manifest giả lập; manifest_hash = sha256 của file này
+    ├── movie_batch_stats.jsonl      4 dòng
+    ├── movie_daily_stats.jsonl      9 dòng
+    ├── analytics_timeseries.jsonl   36 dòng (27 movie + 9 all)
+    └── analytics_top_movies.jsonl   18 dòng
+```
+
+## Fixture phủ những ca nào (contract mục 9, P2)
+
+Dữ liệu gốc: 4 phim (1, 2, 3 và 99 không có title), 4 ngày, **12 rating, tổng điểm 44,0**, mốc T = `2018-03-01T00:00:00Z`.
+
+| Ca bắt buộc | Có trong fixture |
+| --- | --- |
+| Dòng all có `period_start = null` | 1 dòng `period_type=all, entity_type=all`: 12 rating, 4 phim, điểm TB 44/12 |
+| day / month / year | 4 ngày, 2 tháng (2017-12, 2018-01), 2 năm (2017, 2018) |
+| movie / all | mọi kỳ có cả dòng từng phim và dòng toàn hệ thống |
+| Top hai kỳ và ca hòa | Top theo tháng và năm có 2 kỳ; kỳ all: phim 1 và 2 cùng 4 lượt → phim 1 hạng 1; 2018-01: phim 1, 3, 99 cùng 1 lượt |
+| Kỳ trống | tháng 2018-02 (trước T) không có rating nào, nên không có dòng; dashboard hiển thị 0, điểm TB để trống |
+| Thiếu title | phim 99 có `title = null` |
+
+## Lệnh
+
+```bash
+.venv/bin/python contracts/phase2/movie_batch/build_fixtures.py           # sinh lại fixtures/
+.venv/bin/python contracts/phase2/movie_batch/build_fixtures.py --check   # kiểm fixtures/ khớp script
+.venv/bin/python -m pytest modules/elasticsearch/tests/lanes -q           # template + schema + fixture
+```
+
+### Nạp fixture vào Elasticsearch local (để dựng/thử D1, D2)
+
+Cần ES đang chạy theo `modules/elasticsearch/Huong_dan.md` (Secret + `.env` có `ES_*`, `make up`, `make forward`).
+
+```bash
+PYTHONPATH=. make -C modules/elasticsearch init-templates   # cài template (gồm 4 template của lane này)
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.load_fixtures --replace
+```
+
+Kết quả: `dev_p2_movie_batch_stats` 4, `dev_p2_movie_daily_stats` 9, `dev_p2_analytics_timeseries` 36,
+`dev_p2_analytics_top_movies` 18 document. Loader từ chối ghi nếu template chưa được cài; chạy lại không nhân đôi
+(ghi đè theo `_id`). Fixture chỉ nằm trong namespace dev, không gắn vào alias chính (contract mục 4, 9).
+
+Truy vấn mẫu đúng cách D1/D2 đọc:
+
+| Dùng cho | Index | Lọc |
+| --- | --- | --- |
+| D1 · KPI toàn thời gian | `dev_p2_analytics_timeseries` | `entity_type=all` và `period_type=all` (đúng 1 dòng, `period_start=null`) |
+| D1 · Timeline | `dev_p2_analytics_timeseries` | `entity_type=all` và đúng một `period_type` (vd. `month`) |
+| D1 · Top 10 | `dev_p2_analytics_top_movies` | đúng một `period_type` (+ một `period_start` nếu month/year) và `rank_in_period <= 10` |
+| D2 · Xu hướng 1–3 phim | `dev_p2_analytics_timeseries` | `entity_type=movie`, đúng một `period_type`, `movieId` ∈ 1–3 phim |
+
+## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
+
+| Bảng | Số dòng kỳ vọng |
+| --- | --- |
+| `movie_batch_stats` | 9.724 |
+| `movie_daily_stats` | 99.538 |
+| `analytics_timeseries` | 237.096 (movie: 99.538 day + 82.138 month + 41.295 year + 9.724 all; all: 4.110 day + 267 month + 23 year + 1 all) |
+| `analytics_top_movies` | 133.157 (82.138 month + 41.295 year + 9.724 all) |
+
+Dòng all/all thật: 100.836 rating, 9.724 phim, điểm TB 353.083 / 100.836 ≈ 3,50.
