@@ -85,6 +85,28 @@ Truy vấn mẫu đúng cách D1/D2 đọc:
 | D1 · Top 10 | `dev_p2_analytics_top_movies` | đúng một `period_type` (+ một `period_start` nếu month/year) và `rank_in_period <= 10` |
 | D2 · Xu hướng 1–3 phim | `dev_p2_analytics_timeseries` | `entity_type=movie`, đúng một `period_type`, `movieId` ∈ 1–3 phim |
 
+## Nạp dữ liệu thật vào source (K1)
+
+Đầu vào là thư mục export của run (`make -C modules/mapreduce download`), mặc định
+`data/local/mapreduce/export/run_id=20261024T104145Z/`.
+
+```bash
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.load_batch_run --dry-run   # chỉ đọc + kiểm tra
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.load_batch_run             # ghi physical index của run
+```
+
+- Ghi `movie_batch_stats_20261024t104145z` và `movie_daily_stats_20261024t104145z`. Không đụng alias:
+  alias chính do P5 publish cùng 6 alias Batch sau READY.
+- Trước khi ghi, lệnh kiểm tra:
+  - đủ cột theo thứ tự trong manifest;
+  - số dòng bằng `Reduce output records` trong manifest;
+  - từng dòng đúng schema; cùng run, T, `generated_at` với manifest; `avg = sum/count`;
+  - cộng theo ngày của từng phim bằng `movie_batch_stats`; không có ngày nào không trước T.
+- Sau khi ghi, lệnh hỏi lại ES số dòng và tổng lượt.
+- Chạy lại không nhân đôi (ghi đè theo `_id`).
+- Báo cáo nạp ghi vào `data/local/phase2/es_reports/p2_source_<run_id>.json` (số dòng, tổng lượt, `ref_version`,
+  `manifest_sha256`), dùng khi lập READY report.
+
 ## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
 
 | Bảng | Số dòng kỳ vọng |
