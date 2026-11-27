@@ -43,13 +43,12 @@ contracts/phase2/movielens_realtime/
 ├── build_fixtures.py        sinh fixtures/ từ EVENTS + REFERENCE viết tay (nguồn sự thật duy nhất)
 ├── schemas/                 JSON Schema Draft 2020-12 cho 4 bảng (additionalProperties=false)
 └── fixtures/
-    ├── snapshots.json                                   mốc complete + trạng thái mong đợi của từng snapshot
+    ├── snapshots.json                                   history generation + mốc complete của từng snapshot đã publish
     ├── movie_realtime_stats.jsonl                       32 dòng
     ├── genre_realtime.jsonl                             49 dòng
     ├── analytics_growth.jsonl                           81 dòng (= 32 movie + 49 genre)
     ├── analytics_growth_current.fixture-p4-s001.jsonl   15 dòng  READY
-    ├── analytics_growth_current.fixture-p4-s002.jsonl   22 dòng  READY (version mới nhất)
-    └── analytics_growth_current.fixture-p4-s003.jsonl   10 dòng  REJECTED (thiếu size 1h)
+    └── analytics_growth_current.fixture-p4-s002.jsonl   22 dòng  READY (version mới nhất)
 ```
 
 ## Fixture phủ những ca nào (contract mục 9, P4)
@@ -58,11 +57,18 @@ Dữ liệu gốc là 23 rating ngày 2018-09-20 (trước T = `2018-10-01T00:00
 218, 222, 227, 343 (title/genre lấy từ `contracts/samples/movie-reference.sample.tsv`, ref `20261010-01e56f1d`)
 và 999001 (cố ý không có trong reference).
 
-| Snapshot | `source_complete_through` | W 10m | W 1h | Trạng thái |
-| --- | --- | --- | --- | --- |
-| `fixture-p4-s001` | `11:50Z` | `11:40` | `10:00` | READY |
-| `fixture-p4-s002` | `12:00Z` | `11:50` | `11:00` | READY |
-| `fixture-p4-s003` | `12:00Z` | `11:50` | — | REJECTED: thiếu một size, alias phải giữ s002 |
+| Artefact | `analytics_run_id` / snapshot | `source_complete_through` | W 10m | W 1h | `published_at` |
+| --- | --- | --- | --- | --- | --- |
+| Source (Spark Streaming) | — | — | — | — | `updated_at` `2026-11-26T00:00:00Z` |
+| History `analytics_growth` | `fixture-p4-history-g1` | — | — | — | `2026-11-26T00:30:00Z` |
+| Current | `fixture-p4-s001` (history g1) | `11:50Z` | `11:40` | `10:00` | `2026-11-26T01:00:00Z` |
+| Current | `fixture-p4-s002` (history g1) | `12:00Z` | `11:50` | `11:00` | `2026-11-26T02:00:00Z` |
+
+Lifecycle: source → history g1 → s001 → s002. Cả hai snapshot tham chiếu `history_analytics_run_id` là generation có
+thật trong fixture, và generation đó được publish **trước** snapshot nên không có dữ liệu "từ tương lai".
+Fixture chỉ lưu snapshot đã READY/publish. Các candidate lỗi (thiếu size 1h, thiếu entity type, thiếu một entity,
+trùng khóa, chọn window chưa complete, business field lệch history, `selected_window_start` sai) được **dựng ngay trong
+test** từ s002 và phải bị READY check từ chối; chúng không có `published_at` và không lưu thành file.
 
 | Ca bắt buộc | Có trong fixture |
 | --- | --- |
@@ -75,10 +81,12 @@ và 999001 (cố ý không có trong reference).
 | UNKNOWN / thiếu title | Phim 999001 → genre `UNKNOWN`, `title=null` |
 | Hai physical current versions | s001 và s002 trỏ window khác nhau nên rollback thấy rõ; `_id` của cùng entity giữ nguyên giữa các version |
 
-**Chưa phủ (cần P1/P5 xác nhận):** ca "previous tồn tại với count thật bằng 0" (contract mục 5). Ca này không tạo được
-từ source canonical, vì Spark Streaming chỉ sinh window có ít nhất 1 rating và reader `rt_movie`/`rt_genre` khai báo
-`avg_rating` non-null. Schema analytics vẫn cho phép `previous_window_count = 0`, kèm `present=true` và score được tính.
-Fixture không tự chế một source row count 0 để tránh âm thầm đổi semantics source.
+**Kỳ trước thiếu = null, không có ca count = 0.** Source canonical chỉ sinh window có ít nhất 1 rating (Spark
+Streaming groupBy; reader `rt_movie`/`rt_genre` khai báo `avg_rating` non-null). Vì vậy kỳ trước không có rating chính
+là kỳ thiếu, với `present=false`, `previous_window_count=null` và `trending_score=null`. Schema analytics đặt
+`previous_window_count >= 1` khi present, và test chặn mọi trường hợp tự đổi null thành 0. Câu "previous tồn tại và
+count thật bằng 0" ở contract mục 5 không xảy ra được với mô hình dữ liệu hiện tại; cần P1 ghi change request vào
+`DATA_CONTRACT_Phase2.md` mục 5/9 (lane P4 không tự sửa file contract).
 
 ## Lệnh
 
@@ -100,8 +108,7 @@ PYTHONPATH=. make -C modules/elasticsearch init-templates
 
 Kết quả: `dev_p4_movie_realtime_stats` 32, `dev_p4_genre_realtime` 49, `dev_p4_analytics_growth` 81,
 `dev_p4_analytics_growth_current-vfixture-p4-s001` 15, `dev_p4_analytics_growth_current-vfixture-p4-s002` 22 document.
-Loader từ chối ghi nếu template chưa được cài. Chạy lại không nhân đôi document vì ghi đè theo `_id`. Snapshot REJECTED
-không được nạp.
+Loader từ chối ghi nếu template chưa được cài. Chạy lại không nhân đôi document vì ghi đè theo `_id`.
 
 Loader **không** tạo alias: `ESClient.update_aliases` chỉ cho owner `admin`. Nếu cần alias dev để dựng D4 thì P5 trỏ
 `dev_p4_analytics_growth_current` → `dev_p4_analytics_growth_current-vfixture-p4-s002`.

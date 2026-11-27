@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "analytics_growth_current document (Phase2-3.0 analytics current snapshot, P4; D4 current)",
-  "description": "Grain (snapshot_version, window_size, entity_type, entity_key); physical _id = serialize_key_v1(window_size, entity_type, entity_key). Mỗi physical analytics_growth_current-v<snapshot_version> chỉ chứa đúng một selected window mỗi size; selected_window_start = window_start.",
+  "description": "Grain (snapshot_version, window_size, entity_type, entity_key); physical _id = serialize_key_v1(window_size, entity_type, entity_key). Mỗi physical analytics_growth_current-v<snapshot_version> chỉ chứa đúng một selected window mỗi size; selected_window_start = window_start. Với source canonical hiện tại mọi window có >= 1 rating, nên previous tồn tại thì previous_window_count >= 1; kỳ trước không có rating = thiếu = null, không đổi thành 0.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -100,7 +100,7 @@
         "integer",
         "null"
       ],
-      "minimum": 0
+      "minimum": 1
     },
     "previous_window_present": {
       "type": "boolean"

@@ -3,7 +3,7 @@
 Fixture: contracts/phase2/movielens_realtime/fixtures/. Ghi vào namespace dev_p4_ (contract mục 4, 9):
   dev_p4_movie_realtime_stats, dev_p4_genre_realtime, dev_p4_analytics_growth và một physical
   dev_p4_analytics_growth_current-v<snapshot_version> cho mỗi snapshot READY trong snapshots.json.
-Snapshot REJECTED chỉ dùng cho test offline nên không được nạp. Loader KHÔNG tạo/chuyển alias (chỉ
+Loader KHÔNG tạo/chuyển alias (chỉ
 publisher P5 / owner admin được đổi alias).
 Cần ES đang chạy, port-forward 9200, .env có ES_* và đã `make -C modules/elasticsearch init-templates`.
 
@@ -72,8 +72,8 @@ def load_plan() -> list[tuple[str, str, list[dict]]]:
     plan = [(family, f"{PREFIX}{family}", build_records(family, read_jsonl(f"{family}.jsonl")))
             for family in ("movie_realtime_stats", "genre_realtime", "analytics_growth")]
     for snap in read_snapshots():
-        if snap["expected_status"] != "READY":
-            continue
+        if snap["status"] != "READY":
+            raise ValueError(f"{snap['snapshot_version']}: snapshots.json chỉ được chứa snapshot READY")
         rows = read_jsonl(snap["fixture_file"])
         plan.append(("analytics_growth_current", f"{PREFIX}{snap['physical_index']}",
                      build_records("analytics_growth_current", rows)))

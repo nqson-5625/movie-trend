@@ -89,8 +89,8 @@ def current(snap: dict) -> list[dict]:
     return read_jsonl(snap["fixture_file"])
 
 
-def ready_snapshots() -> list[dict]:
-    return [s for s in snapshots() if s["expected_status"] == "READY"]
+def history_generation() -> dict:
+    return load_json(FIXTURES_DIR / "snapshots.json")["history_generation"]
 
 
 def ts(text: str) -> datetime:
@@ -337,6 +337,27 @@ def test_history_previous_is_adjacent_not_nearest():
     assert {r["window_size"] for r in gaps} == set(SIZES), "mỗi size cần một ca previous không liền kề"
 
 
+def test_missing_previous_is_null_never_zero():
+    """Mô hình source hiện tại: window chỉ tồn tại khi có >= 1 rating. Kỳ trước không có rating = thiếu = null.
+
+    Ca contract mục 5 "previous tồn tại với count thật = 0" không thể sinh từ source canonical nên không có trong
+    fixture; schema chặn previous_window_count = 0 để không ai tự đổi null thành 0.
+    """
+    for r in fixture("analytics_growth") + [r for s in snapshots() for r in current(s)]:
+        if r["previous_window_present"]:
+            assert r["previous_window_count"] >= 1 and r["trending_score"] is not None
+        else:
+            assert r["previous_window_count"] is None and r["trending_score"] is None
+    for family in ANALYTICS:
+        validator = Draft202012Validator(schema(family), format_checker=FormatChecker())
+        base = next(r for r in (fixture("analytics_growth") if family == "analytics_growth"
+                                else current(snapshots()[-1])) if not r["previous_window_present"])
+        coerced_zero = {**base, "previous_window_count": 0, "trending_score": float(base["current_window_count"])}
+        assert list(validator.iter_errors(coerced_zero)), f"{family}: present=false mà previous=0 phải bị từ chối"
+        assert list(validator.iter_errors({**coerced_zero, "previous_window_present": True})), \
+            f"{family}: previous_window_count=0 không hợp lệ với mô hình source hiện tại"
+
+
 def test_history_covers_score_sign_and_zero_cases():
     scores = [r["trending_score"] for r in fixture("analytics_growth")]
     assert any(s is None for s in scores)
@@ -367,36 +388,81 @@ def test_history_has_incomplete_window_newer_than_every_boundary():
 
 # ---------------- fixture: analytics_growth_current ----------------
 
-def test_snapshot_manifest_has_two_ready_versions_and_one_rejected():
+def test_snapshot_manifest_lists_only_published_ready_versions():
+    """Artefact đã publish chỉ gồm snapshot READY; snapshot lỗi không bao giờ có published_at (contract 7.2)."""
     snaps = snapshots()
-    assert [s["expected_status"] for s in snaps].count("READY") >= 2, "contract mục 9: hai physical current versions"
-    assert any(s["expected_status"] == "REJECTED" for s in snaps)
+    assert len(snaps) >= 2, "contract mục 9: hai physical current versions"
+    assert all(s["status"] == "READY" for s in snaps)
     for s in snaps:
         assert s["physical_index"] == f"analytics_growth_current-v{s['snapshot_version']}"
         assert (FIXTURES_DIR / s["fixture_file"]).is_file()
+        assert {r["published_at"] for r in current(s)} == {s["published_at"]}
     assert len({s["snapshot_version"] for s in snaps}) == len(snaps)
+    listed = {s["fixture_file"] for s in snaps}
+    assert {p.name for p in FIXTURES_DIR.glob("analytics_growth_current.*.jsonl")} == listed, \
+        "không có file current nào ngoài các snapshot đã publish"
 
 
-@pytest.mark.parametrize("snap", ready_snapshots(), ids=lambda s: s["snapshot_version"])
+def test_snapshots_reference_existing_history_generation_published_before_them():
+    """history_analytics_run_id phải là generation có thật trong fixture và đã publish TRƯỚC snapshot."""
+    gen = history_generation()
+    history = fixture("analytics_growth")
+    assert {r["analytics_run_id"] for r in history} == {gen["analytics_run_id"]}
+    assert {r["published_at"] for r in history} == {gen["published_at"]}
+    assert max(r["updated_at"] for r in history) <= gen["published_at"], "history không được publish trước source"
+    previous_published = gen["published_at"]
+    for snap in snapshots():  # thứ tự trong manifest = thứ tự publish
+        assert snap["history_analytics_run_id"] == gen["analytics_run_id"]
+        assert {r["history_analytics_run_id"] for r in current(snap)} == {gen["analytics_run_id"]}
+        assert snap["published_at"] > previous_published, f"{snap['snapshot_version']} dùng dữ liệu từ tương lai"
+        previous_published = snap["published_at"]
+
+
+@pytest.mark.parametrize("snap", snapshots(), ids=lambda s: s["snapshot_version"])
 def test_ready_snapshot_passes_complete_boundary_protocol(snap):
     assert snapshot_errors(current(snap), fixture("analytics_growth"), snap) == []
 
 
-@pytest.mark.parametrize("snap", ready_snapshots(), ids=lambda s: s["snapshot_version"])
+@pytest.mark.parametrize("snap", snapshots(), ids=lambda s: s["snapshot_version"])
 def test_ready_snapshot_has_exactly_one_window_per_size(snap):
     rows = current(snap)
     for size in SIZES:
         assert len({r["window_start"] for r in rows if r["window_size"] == size}) == 1
 
 
-def test_rejected_snapshot_is_caught_by_ready_check():
-    for snap in snapshots():
-        if snap["expected_status"] == "REJECTED":
-            assert snapshot_errors(current(snap), fixture("analytics_growth"), snap), snap["snapshot_version"]
+def _incomplete_window(rows: list[dict]) -> list[dict]:
+    """Thay 10m bằng window mới hơn nhưng chưa complete lấy từ history."""
+    boundary = rows[0]["source_complete_through"]
+    newer = [h for h in fixture("analytics_growth") if h["window_size"] == "10m" and h["window_end"] > boundary]
+    meta = {k: rows[0][k] for k in ("schema_version", "analytics_run_id", "published_at", "snapshot_version",
+                                    "source_complete_through", "history_analytics_run_id")}
+    return [r for r in rows if r["window_size"] != "10m"] + [
+        {**h, **meta, "selected_window_start": h["window_start"]} for h in newer]
+
+
+BROKEN_SNAPSHOTS = {
+    "missing_size_1h": lambda rows: [r for r in rows if r["window_size"] != "1h"],
+    "missing_entity_genre": lambda rows: [r for r in rows if r["entity_type"] != "genre"],
+    "missing_one_entity": lambda rows: rows[1:],
+    "duplicate_key": lambda rows: rows + rows[:1],
+    "incomplete_window_selected": _incomplete_window,
+    "business_field_drift": lambda rows: [{**rows[0], "current_window_count": rows[0]["current_window_count"] + 1}]
+    + rows[1:],
+    "wrong_selected_window_start": lambda rows: [{**rows[0], "selected_window_start": "2018-09-20T11:00:00Z"}]
+    + rows[1:],
+}
+
+
+@pytest.mark.parametrize("case", sorted(BROKEN_SNAPSHOTS))
+def test_broken_candidate_built_from_valid_snapshot_is_rejected(case):
+    """Ca lỗi (contract 6.2 bước 3-4, mục 12) dựng ngay trong test từ snapshot hợp lệ mới nhất; không lưu thành file."""
+    snap = snapshots()[-1]
+    candidate = BROKEN_SNAPSHOTS[case]([dict(r) for r in current(snap)])
+    assert snapshot_errors(candidate, fixture("analytics_growth"), snap), case
 
 
 def test_ready_versions_differ_so_rollback_is_observable():
-    a, b = ready_snapshots()[:2]
+    a, b = snapshots()[:2]
     pick = lambda s: {(r["window_size"], r["window_start"]) for r in current(s)}  # noqa: E731
     assert a["source_complete_through"] < b["source_complete_through"]
     assert pick(a).isdisjoint(pick(b)), "hai version phải trỏ window khác nhau để thấy rõ khi rollback"
@@ -406,7 +472,7 @@ def test_current_ids_are_stable_across_versions():
     """Physical _id = size|type|key: cùng entity có cùng _id ở mọi version, khác nhau giữa movie và genre."""
     from modules.elasticsearch.lanes.movielens_realtime.load_fixtures import build_records
     by_key = defaultdict(set)
-    for snap in ready_snapshots():
+    for snap in snapshots():
         for rec in build_records("analytics_growth_current", current(snap)):
             by_key[(rec["window_size"], rec["entity_type"], rec["entity_key"])].add(rec["_id"])
     assert all(len(ids) == 1 for ids in by_key.values())
@@ -437,12 +503,12 @@ def test_loader_analytics_ids_match_shared_spark_writer():
         assert rec["_id"] != build_record_id(row, ANALYTICS_KEYS["analytics_growth"]), "không được băm window_start dạng chuỗi"
 
 
-def test_loader_plan_loads_only_ready_snapshots_into_dev_namespace():
+def test_loader_plan_loads_every_published_snapshot_into_dev_namespace():
     from modules.elasticsearch.lanes.movielens_realtime.load_fixtures import load_plan
     plan = load_plan()
     names = [index for _, index, _ in plan]
     assert all(n.startswith("dev_p4_") for n in names)
-    assert "dev_p4_analytics_growth_current-vfixture-p4-s003" not in names
+    assert {f"dev_p4_{s['physical_index']}" for s in snapshots()} <= set(names)
     for _, index, records in plan:
         assert [{k: v for k, v in r.items() if k != "_id"} for r in records]
         family = next(f for f in FAMILIES if index == f"dev_p4_{f}" or index.startswith(f"dev_p4_{f}-v"))

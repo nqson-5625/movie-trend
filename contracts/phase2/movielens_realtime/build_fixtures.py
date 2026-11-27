@@ -2,10 +2,12 @@
 
 Nguồn sự thật duy nhất là EVENTS + REFERENCE bên dưới; mọi bảng còn lại được tính từ đó nên luôn khớp nhau:
   movie_realtime_stats, genre_realtime (source, đúng dạng output Spark Streaming Module 05),
-  analytics_growth (lịch sử) và analytics_growth_current (2 snapshot READY + 1 snapshot phải bị REJECTED).
+  analytics_growth (một history generation) và analytics_growth_current (2 snapshot READY đã publish).
 Fixture phủ các ca contract mục 9 yêu cầu cho P4: hai size 10m/1h; mỗi size có window cũ, window được chọn
 (complete) và window mới hơn chưa complete; movie + genre; previous có/thiếu (kể cả thiếu nhưng có window
 cũ hơn không liền kề); score = 0 khác null; hai physical current versions để thử rollback.
+Thứ tự lifecycle: source updated_at < history published_at < snapshot s001 < snapshot s002.
+Ca snapshot lỗi không lưu thành file: test tự tạo từ snapshot hợp lệ.
 
     .venv/bin/python contracts/phase2/movielens_realtime/build_fixtures.py          # ghi lại fixtures/
     .venv/bin/python contracts/phase2/movielens_realtime/build_fixtures.py --check  # chỉ kiểm tra fixtures/ còn đúng
@@ -26,8 +28,9 @@ SCHEMA_VERSION = "phase2-3.0"
 TIMELINE_MODE = "replay_history"
 BATCH_CUTOFF_TIME = "2018-10-01T00:00:00Z"  # T của Batch; replay MovieLens hiện có đều trước T
 SOURCE_UPDATED_AT = "2026-11-26T00:00:00Z"  # processing time giả lập của Spark Streaming
-HISTORY_RUN_ID = "fixture-p4-history-g2"
-HISTORY_PUBLISHED_AT = "2026-11-26T02:00:00Z"
+# Một history generation duy nhất có trong fixture; publish SAU source và TRƯỚC mọi current snapshot.
+HISTORY_RUN_ID = "fixture-p4-history-g1"
+HISTORY_PUBLISHED_AT = "2026-11-26T00:30:00Z"
 WINDOW_SIZES = {"10m": timedelta(minutes=10), "1h": timedelta(hours=1)}
 
 # Trích từ contracts/samples/movie-reference.sample.tsv (ref_version 20261010-01e56f1d).
@@ -73,18 +76,13 @@ EVENTS = [
     ("2018-09-20T12:03:00Z", 343, 4.5),
 ]
 
-# Mỗi snapshot: mốc complete đã công bố (fixture giả lập replay EOF/watermark) và kết quả mong đợi.
+# Chỉ gồm snapshot đã READY và được publish (contract 6.2 bước 4-5). Ca lỗi (thiếu size, thiếu entity type,
+# window chưa complete...) được tạo ngay trong test từ snapshot hợp lệ, không lưu như artefact đã publish.
 SNAPSHOTS = [
     {"snapshot_version": "fixture-p4-s001", "source_complete_through": "2018-09-20T11:50:00Z",
-     "history_analytics_run_id": "fixture-p4-history-g1", "published_at": "2026-11-26T01:00:00Z",
-     "expected_status": "READY", "reject_reason": None, "sizes": ("10m", "1h")},
+     "published_at": "2026-11-26T01:00:00Z"},
     {"snapshot_version": "fixture-p4-s002", "source_complete_through": "2018-09-20T12:00:00Z",
-     "history_analytics_run_id": "fixture-p4-history-g2", "published_at": "2026-11-26T02:00:00Z",
-     "expected_status": "READY", "reject_reason": None, "sizes": ("10m", "1h")},
-    # Cố ý thiếu size 1h: publisher/READY check phải từ chối, alias giữ s002 (contract 6.2 bước 3-4, mục 12).
-    {"snapshot_version": "fixture-p4-s003", "source_complete_through": "2018-09-20T12:00:00Z",
-     "history_analytics_run_id": "fixture-p4-history-g2", "published_at": "2026-11-26T03:00:00Z",
-     "expected_status": "REJECTED", "reject_reason": "missing_window_size_1h", "sizes": ("10m",)},
+     "published_at": "2026-11-26T02:00:00Z"},
 ]
 
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -137,9 +135,14 @@ def build_sources() -> tuple[list[dict], list[dict]]:
 
 
 def trending_score(current: int, previous: int | None) -> float | None:
-    """Contract mục 5: (current - previous) / (previous + 1); previous không tồn tại -> null (không phải 0)."""
+    """Contract mục 5: (current - previous) / (previous + 1); previous không tồn tại -> null, không tự đổi thành 0.
+
+    Source canonical chỉ có window >= 1 rating nên previous tồn tại luôn >= 1; kỳ không có rating = thiếu = null.
+    """
     if previous is None:
         return None
+    if previous < 1:
+        raise ValueError("previous_window_count tồn tại phải >= 1 với mô hình source hiện tại")
     return (current - previous) / (previous + 1)
 
 
@@ -180,7 +183,7 @@ def selected_window_start(history: list[dict], size: str, complete_through: str)
 
 def build_current(history: list[dict], snap: dict) -> list[dict]:
     rows = []
-    for size in snap["sizes"]:
+    for size in WINDOW_SIZES:
         w = selected_window_start(history, size, snap["source_complete_through"])
         for h in history:
             if h["window_size"] == size and h["window_start"] == w:
@@ -190,7 +193,7 @@ def build_current(history: list[dict], snap: dict) -> list[dict]:
                     "published_at": snap["published_at"],
                     "snapshot_version": snap["snapshot_version"], "selected_window_start": w,
                     "source_complete_through": snap["source_complete_through"],
-                    "history_analytics_run_id": snap["history_analytics_run_id"],
+                    "history_analytics_run_id": HISTORY_RUN_ID,
                 })
     return rows
 
@@ -203,8 +206,11 @@ def build_snapshots_manifest() -> dict:
         "complete_basis": "fixture_declared_watermark",
         "covers": ["movie_realtime_stats", "genre_realtime"],
         "batch_cutoff_time": BATCH_CUTOFF_TIME,
+        "history_generation": {"analytics_run_id": HISTORY_RUN_ID, "published_at": HISTORY_PUBLISHED_AT,
+                               "fixture_file": "analytics_growth.jsonl"},
         "snapshots": [
-            {**{k: v for k, v in s.items() if k != "sizes"}, "window_sizes": list(s["sizes"]),
+            {**s, "status": "READY", "history_analytics_run_id": HISTORY_RUN_ID,
+             "window_sizes": list(WINDOW_SIZES),
              "fixture_file": f"analytics_growth_current.{s['snapshot_version']}.jsonl",
              "physical_index": f"analytics_growth_current-v{s['snapshot_version']}"}
             for s in SNAPSHOTS
