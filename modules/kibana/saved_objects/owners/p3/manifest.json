@@ -1,0 +1,24 @@
+{
+  "owner": "p3",
+  "contract_version": "Phase2-3.0",
+  "kibana_version": "8.15.3",
+  "dashboard_id": "mt-p2-8153-d3",
+  "data_view_ids": [
+    "dv_d3_genre_trends"
+  ],
+  "object_ids": [
+    "mt-p2-8153-d3-nav",
+    "mt-p2-8153-d3-header",
+    "mt-p2-8153-d3-total",
+    "mt-p2-8153-d3-genres",
+    "mt-p2-8153-d3-peak",
+    "mt-p2-8153-d3-avg",
+    "mt-p2-8153-d3-line",
+    "mt-p2-8153-d3-top",
+    "mt-p2-8153-d3-heat",
+    "mt-p2-8153-d3-note",
+    "mt-p2-8153-d3"
+  ],
+  "ndjson_file": "d03_genres.ndjson",
+  "exported_at": "2026-11-27T00:00:00Z"
+}
