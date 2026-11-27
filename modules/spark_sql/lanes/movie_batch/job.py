@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,9 @@ SQL_DIR = Path(__file__).resolve().parent / "sql"
 REPORTS_DIR = PROJECT_ROOT / "data/local/phase2/es_reports"
 DEFAULT_RUN_ID = "20261024T104145Z"
 FAMILIES = ("analytics_timeseries", "analytics_top_movies")
+TIMESERIES_PERIODS = ("day", "month", "year", "all")
+TOP_PERIODS = ("month", "year", "all")
+SUM_FIELDS = ("interaction_count", "rating_count", "rating_sum")
 SOURCE_VIEWS = {"batch_movie": "movie_batch_stats", "batch_movie_daily": "movie_daily_stats"}
 
 
@@ -60,6 +64,16 @@ def check_frames(frames: dict[str, DataFrame], expected_total: int, expected_mov
     """Đối soát trước khi ghi; sai ở đâu thì dừng, không ghi gì lên ES."""
     ts, top = frames["analytics_timeseries"], frames["analytics_top_movies"]
     errors = []
+    # Thiếu trọn một kỳ thì các phép so tổng phía dưới không thấy, nên phải chốt đủ tập period_type trước
+    for entity in ("movie", "all"):
+        found = {r["period_type"] for r in ts.filter(F.col("entity_type") == entity).select("period_type")
+                 .distinct().collect()}
+        if found != set(TIMESERIES_PERIODS):
+            errors.append(f"analytics_timeseries entity_type={entity} có period_type {sorted(found)}, "
+                          f"cần đủ {sorted(TIMESERIES_PERIODS)}")
+    found_top = {r["period_type"] for r in top.select("period_type").distinct().collect()}
+    if found_top != set(TOP_PERIODS):
+        errors.append(f"analytics_top_movies có period_type {sorted(found_top)}, cần đủ {sorted(TOP_PERIODS)}")
     all_time = ts.filter("entity_type = 'all' AND period_type = 'all'").collect()
     if len(all_time) != 1 or all_time[0]["period_start"] is not None:
         errors.append(f"cần đúng 1 dòng all/all có period_start NULL, có {len(all_time)}")
@@ -97,16 +111,26 @@ def write_family(df: DataFrame, family: str, target: str, client: ESClient, io_m
         write_analytics_df_distributed(df, target, family)
     else:
         write_analytics_df(df, target, ANALYTICS_KEY_COLUMNS[family], owner="p2", analytics_family=family)
+    totals = verify_written(df, target, client)
+    print(f"[OK] {target}: {totals['row_count']} document, tổng khớp Spark")
+    return {"alias_name": family, "physical_index": target, "row_count": totals["row_count"], "duplicate_id_count": 0,
+            "bulk_error_count": 0, "sum_count": float(totals["interaction_count"])}
+
+
+def verify_written(df: DataFrame, target: str, client: ESClient) -> dict:
+    """Đọc lại từ ES số document và tổng các cột số, so với chính DataFrame vừa ghi."""
+    spark_row = df.agg(F.count("*").alias("row_count"),
+                       *[F.sum(c).alias(c) for c in SUM_FIELDS]).collect()[0].asDict()
     client.refresh(target)
-    expected = df.count()
     resp = client.search(target, {"size": 0, "track_total_hits": True,
-                                  "aggs": {"s": {"sum": {"field": "interaction_count"}}}})
-    count = resp["hits"]["total"]["value"]
-    if count != expected:
-        raise RuntimeError(f"{target}: ES có {count} document, Spark tạo {expected} dòng")
-    print(f"[OK] {target}: {count} document")
-    return {"alias_name": family, "physical_index": target, "row_count": count, "duplicate_id_count": 0,
-            "bulk_error_count": 0, "sum_count": float(resp["aggregations"]["s"]["value"])}
+                                  "aggs": {c: {"sum": {"field": c}} for c in SUM_FIELDS}})
+    es = {"row_count": resp["hits"]["total"]["value"],
+          **{c: resp["aggregations"][c]["value"] for c in SUM_FIELDS}}
+    mismatched = [f"{k}: ES={es[k]} Spark={spark_row[k]}" for k in es
+                  if not math.isclose(float(es[k]), float(spark_row[k] or 0), rel_tol=1e-9)]
+    if mismatched:
+        raise RuntimeError(f"{target}: dữ liệu trên ES khác Spark ({'; '.join(mismatched)})")
+    return {"row_count": int(es["row_count"]), "interaction_count": int(es["interaction_count"])}
 
 
 def main() -> int:

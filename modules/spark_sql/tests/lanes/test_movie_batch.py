@@ -27,8 +27,10 @@ from modules.spark_sql.common.writers.analytics_writer import (  # noqa: E402
 )
 from modules.spark_sql.lanes.movie_batch.job import (  # noqa: E402
     FAMILIES,
+    SUM_FIELDS,
     build_frames,
     check_frames,
+    verify_written,
     with_common_columns,
 )
 
@@ -106,6 +108,56 @@ def test_check_frames_rejects_missing_movie_row(frames):
         "NOT (entity_type = 'movie' AND period_type = 'month' AND movieId = 99)")
     with pytest.raises(ValueError, match="kỳ month|khác tổng"):
         check_frames(broken, expected_total=12, expected_movies=4)
+
+
+@pytest.mark.parametrize("period_type", ["day", "month", "year"])
+def test_check_frames_rejects_missing_whole_period(frames, period_type):
+    """Review PR #9: bỏ trọn một kỳ (cả dòng movie lẫn dòng all) thì các phép so tổng không thấy, phải bị chặn."""
+    broken = dict(frames)
+    broken["analytics_timeseries"] = frames["analytics_timeseries"].filter(f"period_type != '{period_type}'")
+    with pytest.raises(ValueError, match="cần đủ"):
+        check_frames(broken, expected_total=12, expected_movies=4)
+
+
+def test_check_frames_rejects_top_missing_whole_period(frames):
+    broken = dict(frames)
+    broken["analytics_top_movies"] = frames["analytics_top_movies"].filter("period_type != 'year'")
+    with pytest.raises(ValueError, match="analytics_top_movies có period_type"):
+        check_frames(broken, expected_total=12, expected_movies=4)
+
+
+class FakeES:
+    """Trả về số document và tổng như ES sau khi ghi, để thử bước đọc lại mà không cần cụm thật."""
+
+    def __init__(self, count, sums):
+        self.count, self.sums = count, sums
+
+    def refresh(self, index):
+        return {}
+
+    def search(self, index, body):
+        return {"hits": {"total": {"value": self.count}},
+                "aggregations": {k: {"value": self.sums[k]} for k in body["aggs"]}}
+
+
+def test_verify_written_accepts_matching_totals(frames):
+    top = fixture("analytics_top_movies")
+    sums = {k: sum(r[k] for r in top) for k in SUM_FIELDS}
+    totals = verify_written(frames["analytics_top_movies"], "dev_p2_analytics_top_movies", FakeES(len(top), sums))
+    assert totals == {"row_count": 18, "interaction_count": sums["interaction_count"]}
+
+
+@pytest.mark.parametrize("field", ["row_count", *SUM_FIELDS])
+def test_verify_written_rejects_es_different_from_spark(frames, field):
+    """Review PR #9: không chỉ so số document mà cả interaction_count, rating_count, rating_sum."""
+    top = fixture("analytics_top_movies")
+    count, sums = len(top), {k: sum(r[k] for r in top) for k in SUM_FIELDS}
+    if field == "row_count":
+        count -= 1
+    else:
+        sums[field] += 0.5
+    with pytest.raises(RuntimeError, match=field):
+        verify_written(frames["analytics_top_movies"], "dev_p2_analytics_top_movies", FakeES(count, sums))
 
 
 def test_check_frames_rejects_incomplete_top(frames):
