@@ -85,6 +85,55 @@ Truy vấn mẫu đúng cách D1/D2 đọc:
 | D1 · Top 10 | `dev_p2_analytics_top_movies` | đúng một `period_type` (+ một `period_start` nếu month/year) và `rank_in_period <= 10` |
 | D2 · Xu hướng 1–3 phim | `dev_p2_analytics_timeseries` | `entity_type=movie`, đúng một `period_type`, `movieId` ∈ 1–3 phim |
 
+## Nạp dữ liệu thật vào source (K1)
+
+Đầu vào là thư mục export của run (`make -C modules/mapreduce download`), mặc định
+`data/local/mapreduce/export/run_id=20261024T104145Z/`.
+
+```bash
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.load_batch_run --dry-run   # chỉ đọc + kiểm tra
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.load_batch_run             # ghi physical index của run
+```
+
+- Ghi `movie_batch_stats_20261024t104145z` và `movie_daily_stats_20261024t104145z`. Không đụng alias:
+  alias chính do P5 publish cùng 6 alias Batch sau READY.
+- Trước khi ghi, lệnh kiểm tra:
+  - đủ cột theo thứ tự trong manifest;
+  - số dòng bằng `Reduce output records` trong manifest;
+  - từng dòng đúng schema; cùng run, T, `generated_at` với manifest; `avg = sum/count`;
+  - cộng theo ngày của từng phim bằng `movie_batch_stats`; không có ngày nào không trước T.
+- Sau khi ghi, lệnh hỏi lại ES số dòng và tổng lượt.
+- Chạy lại không nhân đôi (ghi đè theo `_id`).
+- Báo cáo nạp ghi vào `data/local/phase2/es_reports/p2_source_<run_id>.json` (số dòng, tổng lượt, `ref_version`,
+  `manifest_sha256`), dùng khi lập READY report.
+
+## Build analytics từ source (K2)
+
+SQL nằm ở `modules/spark_sql/lanes/movie_batch/sql/`. Job là `modules/spark_sql/lanes/movie_batch/job.py`:
+đọc hai physical source của run, chạy SQL, đối soát trong Spark rồi ghi `analytics_timeseries_<run>` và
+`analytics_top_movies_<run>`. Job không đụng alias.
+
+Spark 3.5.1 cần Python 3.12, giống CI; Python 3.14 lỗi `RecursionError` trong cloudpickle. Trên máy dev:
+
+```bash
+export PYSPARK_PYTHON=~/.venvs/movie-trend-spark/bin/python PYSPARK_DRIVER_PYTHON=$PYSPARK_PYTHON
+$PYSPARK_PYTHON -m pytest modules/spark_sql/tests/lanes -q                                  # SQL tái tạo đúng fixture
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.job --io-mode fixture --dry-run      # tính + đối soát
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.job --io-mode fixture                # ghi physical analytics
+```
+
+- `ref_version` và `manifest_hash` lấy từ báo cáo nạp source `p2_source_<run>.json`, tức từ manifest của run.
+- Trước khi ghi, job đối soát:
+  - có đúng 1 dòng `all/all`, khớp tổng lượt và số phim của source;
+  - mỗi `period_type`, cộng các dòng movie bằng tổng source;
+  - dòng `all` của từng kỳ bằng tổng các dòng movie kỳ đó;
+  - Top có đủ mọi phim của kỳ.
+- Báo cáo ghi analytics: `data/local/phase2/es_reports/p2_analytics_<run>.json`.
+- `--io-mode distributed` (Spark ES connector) cần `SPARK_ES_PACKAGE`. Hiện `spark_session.py` dùng chung truyền
+  `es.nodes` / `es.net.http.auth.*` mà không có tiền tố `spark.`, nên Spark bỏ qua (cảnh báo
+  `Ignoring non-Spark config property`). Vì vậy run hiện tại ghi bằng `fixture` (REST bulk qua writer dùng chung):
+  hết khoảng 1 phút, bộ nhớ đỉnh khoảng 500 MB.
+
 ## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
 
 | Bảng | Số dòng kỳ vọng |
