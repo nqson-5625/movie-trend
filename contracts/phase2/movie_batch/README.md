@@ -134,6 +134,46 @@ $PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.job --io-mode fixture    
   `Ignoring non-Spark config property`). Vì vậy run hiện tại ghi bằng `fixture` (REST bulk qua writer dùng chung):
   hết khoảng 1 phút, bộ nhớ đỉnh khoảng 500 MB.
 
+## Truy vấn bắt buộc của P2: query 1, 2, 4, 5, 6 (contract mục 8.1)
+
+SQL nằm ở `modules/spark_sql/lanes/movie_batch/sql/queries/`, hàm Python ở `modules/spark_sql/lanes/movie_batch/queries.py`.
+Truy vấn chạy trên source của run và hai analytics tạo bằng đúng SQL của job, nên luôn khớp D1/D2. Kết quả không ghi
+thành index (contract chỉ bắt materialize sáu analytics family).
+
+| # | Truy vấn | Cách tính |
+| --- | --- | --- |
+| 1 | Top phim | `analytics_top_movies` của **đúng một** kỳ month/year/all, theo `rank_in_period` (hòa thì `movieId` tăng) |
+| 2 | Rating trung bình phim | Dòng `entity_type=movie` của một kỳ; `rating_sum / rating_count`, không average-of-averages; ngưỡng `min_ratings` tùy chọn (mặc định 1) |
+| 4 | Xu hướng 7 ngày | previous `[mốc-14, mốc-7)`, current `[mốc-7, mốc)`; `growth = (current - previous) / (previous + 1)` (DATA_CONTRACT 14.4) |
+| 5 | Xu hướng 30 ngày | Như query 4 với 30 ngày liên tiếp; không thay bằng tháng lịch |
+| 6 | WoW | Hai tuần ISO trọn vẹn (thứ Hai 00:00Z): tuần trọn gần nhất kết thúc trước hoặc đúng mốc, so với tuần liền trước |
+
+Quy ước cho query 4–6:
+- **Mốc** mặc định là ngày của T. Mốc lấy trên timeline dữ liệu nguồn, không dùng ngày hiện tại của máy (DATA_CONTRACT mục 5.4).
+  Muốn demo một giai đoạn có nhiều rating thì truyền `--as-of`.
+- **`coverage_status`:** `verified` khi cả hai khoảng nằm trong vùng Batch đã tính (từ ngày có rating đầu tiên tới
+  `current_end <= T`). Ngược lại là `unverified`, và số đếm cùng `growth` để NULL.
+- `window_bounds()` luôn trả đúng 1 dòng (hai khoảng + `coverage_status`), kể cả khi hai khoảng không có rating nào.
+
+```bash
+export PYSPARK_PYTHON=~/.venvs/movie-trend-spark/bin/python PYSPARK_DRIVER_PYTHON=$PYSPARK_PYTHON
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.queries q01 --period-type month --period-start 2018-05-01
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.queries q02 --movie-id 1 --movie-id 296
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.queries q04 --as-of 2018-09-01   # q05, q06 tương tự
+```
+
+Kết quả với run thật:
+- Query 1 all-time: Forrest Gump 329 · Shawshank 317 · Pulp Fiction 307.
+- Query 2: Shawshank 4,429 (317 rating).
+- Query 4 với mốc T: previous `[2018-09-17, 2018-09-24)`, current `[2018-09-24, 2018-10-01)`, `verified`, 186 phim.
+  Rating cuối là 2018-09-24, nên current chỉ có ngày đó.
+
+Dữ liệu nhỏ (mỗi phim vài rating mỗi tuần) nên growth thường là 0→1 hoặc 0→2. Contract cho phép thêm ngưỡng loại phim ít
+tương tác (DATA_CONTRACT 14.3), nhưng ngưỡng đó phải được ghi rõ như một cấu hình; hiện chưa đặt.
+
+Query 8 (Batch vs Realtime) do P4 làm chủ, P2 phối hợp. Hai bên cần chốt chung mốc T cho fixture có T nằm giữa hai
+nguồn; fixture hiện tại của P2 dùng T = `2018-03-01`, của P4 dùng T = `2018-10-01`.
+
 ## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
 
 | Bảng | Số dòng kỳ vọng |
