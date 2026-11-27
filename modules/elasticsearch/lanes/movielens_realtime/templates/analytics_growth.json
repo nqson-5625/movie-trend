@@ -1,0 +1,88 @@
+{
+  "index_patterns": [
+    "analytics_growth",
+    "analytics_growth-*",
+    "dev_p2_analytics_growth",
+    "dev_p2_analytics_growth-*",
+    "dev_p3_analytics_growth",
+    "dev_p3_analytics_growth-*",
+    "dev_p4_analytics_growth",
+    "dev_p4_analytics_growth-*",
+    "dev_p5_analytics_growth",
+    "dev_p5_analytics_growth-*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings",
+    "movie_trend_analytics_meta"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "window_start": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "window_end": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "window_size": {
+          "type": "keyword"
+        },
+        "entity_type": {
+          "type": "keyword"
+        },
+        "entity_key": {
+          "type": "keyword"
+        },
+        "movieId": {
+          "type": "integer"
+        },
+        "genre": {
+          "type": "keyword"
+        },
+        "title": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 512
+            }
+          }
+        },
+        "title_source": {
+          "type": "keyword"
+        },
+        "current_window_count": {
+          "type": "long"
+        },
+        "previous_window_count": {
+          "type": "long"
+        },
+        "previous_window_present": {
+          "type": "boolean"
+        },
+        "trending_score": {
+          "type": "double"
+        },
+        "rating_count": {
+          "type": "long"
+        },
+        "rating_sum": {
+          "type": "double"
+        },
+        "avg_rating": {
+          "type": "double"
+        },
+        "updated_at": {
+          "type": "date",
+          "format": "strict_date_optional_time||strict_date"
+        },
+        "timeline_mode": {
+          "type": "keyword"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "genre_realtime document (Phase2-3.0 source, writer Spark Streaming; P4 nghiệm thu)",
+  "description": "Grain (genre, window_start, window_size); _id literal genre|window_start|window_size. Join miss hoặc '(no genres listed)' giữ genre=UNKNOWN.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "window_start",
+    "window_end",
+    "window_size",
+    "genre",
+    "interaction_count",
+    "rating_count",
+    "rating_sum",
+    "avg_rating",
+    "updated_at"
+  ],
+  "properties": {
+    "window_start": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "window_end": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "window_size": {
+      "enum": [
+        "10m",
+        "1h"
+      ]
+    },
+    "genre": {
+      "type": "string",
+      "minLength": 1
+    },
+    "interaction_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rating_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rating_sum": {
+      "type": "number",
+      "minimum": 0.5
+    },
+    "avg_rating": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 5.0
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcTimestamp"
+    }
+  },
+  "$defs": {
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  }
+}

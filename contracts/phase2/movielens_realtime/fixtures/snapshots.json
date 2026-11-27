@@ -1,0 +1,44 @@
+{
+  "batch_cutoff_time": "2018-10-01T00:00:00Z",
+  "complete_basis": "fixture_declared_watermark",
+  "covers": [
+    "movie_realtime_stats",
+    "genre_realtime"
+  ],
+  "fixture": true,
+  "history_generation": {
+    "analytics_run_id": "fixture-p4-history-g1",
+    "fixture_file": "analytics_growth.jsonl",
+    "published_at": "2026-11-26T00:30:00Z"
+  },
+  "note": "FIXTURE P4 dựng tay, không phải replay MovieLens thật",
+  "schema_version": "phase2-3.0",
+  "snapshots": [
+    {
+      "fixture_file": "analytics_growth_current.fixture-p4-s001.jsonl",
+      "history_analytics_run_id": "fixture-p4-history-g1",
+      "physical_index": "analytics_growth_current-vfixture-p4-s001",
+      "published_at": "2026-11-26T01:00:00Z",
+      "snapshot_version": "fixture-p4-s001",
+      "source_complete_through": "2018-09-20T11:50:00Z",
+      "status": "READY",
+      "window_sizes": [
+        "10m",
+        "1h"
+      ]
+    },
+    {
+      "fixture_file": "analytics_growth_current.fixture-p4-s002.jsonl",
+      "history_analytics_run_id": "fixture-p4-history-g1",
+      "physical_index": "analytics_growth_current-vfixture-p4-s002",
+      "published_at": "2026-11-26T02:00:00Z",
+      "snapshot_version": "fixture-p4-s002",
+      "source_complete_through": "2018-09-20T12:00:00Z",
+      "status": "READY",
+      "window_sizes": [
+        "10m",
+        "1h"
+      ]
+    }
+  ]
+}
