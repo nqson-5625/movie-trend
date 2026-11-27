@@ -46,6 +46,35 @@ DAILY = [
 
 BATCH_META = {"batch_run_id": BATCH_RUN_ID, "batch_cutoff_time": BATCH_CUTOFF_TIME}
 
+# ---- Phía Batch của fixture query 8 "Batch vs Realtime" (contract mục 8.1: P4 làm chủ, P2 cấp phía Batch) ----
+# T nằm giữa hai nguồn: 7 rating trước 11:00 ngày 2018-09-20 của fixture movielens_realtime (P4) thuộc Batch,
+# các cửa sổ RT có window_start >= T là phần Realtime. Ghép đúng phải ra đúng 23 rating của fixture P4.
+Q8_RUN_ID = "fixture-p2-q8"
+Q8_CUTOFF_TIME = "2018-09-20T11:00:00Z"
+Q8_REF_VERSION = "20261010-01e56f1d"  # cùng reference sample với fixture P4
+Q8_TITLES = {218: "Boys on the Side (1995)", 222: "Circle of Friends (1995)", 227: "Drop Zone (1994)",
+             343: "Baby-Sitters Club, The (1995)"}
+Q8_RATINGS_BEFORE_T = [  # (event_time UTC, movieId, rating) — trùng các rating < T trong fixture P4
+    ("2018-09-20T09:15:00Z", 222, 4.0),
+    ("2018-09-20T09:20:00Z", 343, 3.0),
+    ("2018-09-20T09:30:00Z", 227, 3.5),
+    ("2018-09-20T10:05:00Z", 222, 5.0),
+    ("2018-09-20T10:10:00Z", 222, 4.0),
+    ("2018-09-20T10:30:00Z", 218, 2.0),
+    ("2018-09-20T10:45:00Z", 343, 3.5),
+]
+
+
+def q8_daily() -> list[tuple[str, int, int, float]]:
+    """Cộng các rating trước T thành dạng movie_daily_stats (ngày UTC của event_time)."""
+    acc: dict[tuple[str, int], list] = defaultdict(lambda: [0, 0.0])
+    for event_time, movie, rating in Q8_RATINGS_BEFORE_T:
+        if event_time >= Q8_CUTOFF_TIME:
+            raise ValueError(f"Rating {event_time} không trước mốc T của query 8")
+        acc[(event_time[:10], movie)][0] += 1
+        acc[(event_time[:10], movie)][1] += rating
+    return [(day, movie, count, total) for (day, movie), (count, total) in sorted(acc.items())]
+
 
 def period_start(period_type: str, day: str) -> str | None:
     """Đầu kỳ UTC (contract 6.1); kỳ all không có period_start."""
@@ -56,20 +85,20 @@ def stats(count: int, total: float) -> dict:
     return {"interaction_count": count, "rating_count": count, "rating_sum": total, "avg_rating": total / count}
 
 
-def build_sources() -> tuple[list[dict], list[dict]]:
+def build_sources(daily_rows=DAILY, titles=TITLES, meta=BATCH_META) -> tuple[list[dict], list[dict]]:
     daily = [
-        {**BATCH_META, "generated_at": GENERATED_AT, "date": day, "movieId": movie,
+        {**meta, "generated_at": GENERATED_AT, "date": day, "movieId": movie,
          "interaction_count": count, "rating_count": count, "rating_sum": total, "avg_rating": total / count}
-        for day, movie, count, total in sorted(DAILY)
+        for day, movie, count, total in sorted(daily_rows)
     ]
     per_movie: dict[int, list[float]] = defaultdict(lambda: [0, 0.0])
-    for _, movie, count, total in DAILY:
+    for _, movie, count, total in daily_rows:
         per_movie[movie][0] += count
         per_movie[movie][1] += total
     movies = []
     for movie in sorted(per_movie):
         count, total = per_movie[movie]
-        doc = {**BATCH_META, "generated_at": GENERATED_AT, "movieId": movie, "title": TITLES[movie],
+        doc = {**meta, "generated_at": GENERATED_AT, "movieId": movie, "title": titles[movie],
                "total_count": count, "rating_count": count, "rating_sum": total, "avg_rating": total / count}
         movies.append(doc)
     return movies, daily
@@ -124,18 +153,19 @@ def build_top_movies(manifest_hash: str) -> list[dict]:
     return rows
 
 
-def build_manifest() -> dict:
+def build_manifest(run_id=BATCH_RUN_ID, cutoff=BATCH_CUTOFF_TIME, ref_version=REF_VERSION,
+                   note="FIXTURE P2 dựng tay, không phải kết quả MapReduce thật") -> dict:
     """Manifest giả lập đúng dạng /batch/_meta/run_id=<id>/manifest.json của Module 04."""
     return {
-        "run_id": BATCH_RUN_ID,
-        "batch_cutoff_time": BATCH_CUTOFF_TIME,
+        "run_id": run_id,
+        "batch_cutoff_time": cutoff,
         "generated_at": GENERATED_AT,
         "contract_version": "1.0-draft",
         "semantics": "event_time < batch_cutoff_time",
-        "reference": {"ref_version": REF_VERSION},
+        "reference": {"ref_version": ref_version},
         "output_format": {"files": "part-NNNNN", "delimiter": "tab", "header": False},
         "fixture": True,
-        "note": "FIXTURE P2 dựng tay, không phải kết quả MapReduce thật",
+        "note": note,
     }
 
 
@@ -147,12 +177,19 @@ def render() -> dict[str, str]:
     manifest_text = json.dumps(build_manifest(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     manifest_hash = hashlib.sha256(manifest_text.encode("utf-8")).hexdigest()
     movies, daily = build_sources()
+    q8_manifest = build_manifest(Q8_RUN_ID, Q8_CUTOFF_TIME, Q8_REF_VERSION,
+                                 "FIXTURE P2 phía Batch cho query 8, khớp fixture movielens_realtime của P4")
+    q8_movies, q8_daily_rows = build_sources(q8_daily(), Q8_TITLES,
+                                             {"batch_run_id": Q8_RUN_ID, "batch_cutoff_time": Q8_CUTOFF_TIME})
     return {
         "manifest.json": manifest_text,
         "movie_batch_stats.jsonl": jsonl(movies),
         "movie_daily_stats.jsonl": jsonl(daily),
         "analytics_timeseries.jsonl": jsonl(build_timeseries(manifest_hash)),
         "analytics_top_movies.jsonl": jsonl(build_top_movies(manifest_hash)),
+        "query8/manifest.json": json.dumps(q8_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        "query8/movie_batch_stats.jsonl": jsonl(q8_movies),
+        "query8/movie_daily_stats.jsonl": jsonl(q8_daily_rows),
     }
 
 
@@ -169,8 +206,8 @@ def main() -> int:
             return 1
         print(f"[OK] {len(files)} file fixture khớp build_fixtures.py")
         return 0
-    FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
     for name, text in files.items():
+        (FIXTURES_DIR / name).parent.mkdir(parents=True, exist_ok=True)
         (FIXTURES_DIR / name).write_text(text, encoding="utf-8")
         print(f"[OK] {name}: {text.count(chr(10))} dòng")
     return 0

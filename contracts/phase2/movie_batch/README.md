@@ -171,8 +171,55 @@ Kết quả với run thật:
 Dữ liệu nhỏ (mỗi phim vài rating mỗi tuần) nên growth thường là 0→1 hoặc 0→2. Contract cho phép thêm ngưỡng loại phim ít
 tương tác (DATA_CONTRACT 14.3), nhưng ngưỡng đó phải được ghi rõ như một cấu hình; hiện chưa đặt.
 
-Query 8 (Batch vs Realtime) do P4 làm chủ, P2 phối hợp. Hai bên cần chốt chung mốc T cho fixture có T nằm giữa hai
-nguồn; fixture hiện tại của P2 dùng T = `2018-03-01`, của P4 dùng T = `2018-10-01`.
+### Fixture query 8 "Batch vs Realtime" (P4 làm chủ, P2 cấp phía Batch)
+
+`fixtures/query8/` là phía Batch, với **T = `2018-09-20T11:00:00Z`** nằm giữa hai nguồn:
+- Phía Batch: 7 rating trước 11:00 của chính fixture `contracts/phase2/movielens_realtime` (P4).
+- Phía Realtime: các cửa sổ `window_start >= T` của fixture P4. Dùng nguyên fixture P4, không phải sửa.
+- T tròn giờ nên không cửa sổ 10m/1h nào bị cắt đôi.
+
+| movieId | Batch (< T) | RT (>= T) | Ghép đúng |
+| --- | ---: | ---: | ---: |
+| 218 | 1 | 4 | 5 |
+| 222 | 3 | 5 | 8 |
+| 227 | 1 | 2 | 3 |
+| 343 | 2 | 3 | 5 |
+| 999001 | 0 | 2 | 2 |
+| **Tổng** | 7 | 16 | **23** = đủ 23 rating của fixture P4 |
+
+Cửa sổ 10m và 1h đều phải ra 23. Cộng thẳng Batch + mọi cửa sổ RT không lọc T ra 30, tức đếm trùng 7.
+Test `test_query8_batch_side_matches_p4_realtime_fixture` kiểm chéo hai fixture. T này chỉ dùng cho fixture;
+T của run thật vẫn là `2018-10-01T00:00:00Z`.
+
+## READY report (P2.3)
+
+```bash
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.emit_ready_report --sql-test-result PASS
+```
+
+Lệnh gộp `p2_source_<run>.json` và `p2_analytics_<run>.json`, rồi **kiểm tra lại trực tiếp trên ES** trước khi ghi
+`status = READY` vào `data/local/phase2/es_reports/p2_ready_<run>.json`:
+- 4 physical index tồn tại, đúng số document;
+- mỗi index đúng một `batch_run_id` và một `batch_cutoff_time`;
+- hai analytics có đúng một `ref_version` và một `manifest_hash`, trùng manifest của run;
+- tổng lượt all-time của cả 4 index bằng nhau (`sum_count`).
+
+Chỉ truyền `--sql-test-result PASS` sau khi `modules/spark_sql/tests/lanes` pass; `FAIL` thì report là `NOT_READY`.
+Report dùng `ReadyReport` dùng chung, nên P5 ghép được với `p3_ready_<run>.json` qua `validate_ready_reports_pair`
+rồi chạy `make -C modules/elasticsearch publish-dry` / `publish RUN_ID=<run>`.
+
+Run `20261024T104145Z` đã READY:
+
+| Alias | Physical index | Document | Tổng lượt |
+| --- | --- | ---: | ---: |
+| `movie_batch_stats` | `movie_batch_stats_20261024t104145z` | 9.724 | 100.836 |
+| `movie_daily_stats` | `movie_daily_stats_20261024t104145z` | 99.538 | 100.836 |
+| `analytics_timeseries` | `analytics_timeseries_20261024t104145z` | 237.096 | 100.836 |
+| `analytics_top_movies` | `analytics_top_movies_20261024t104145z` | 133.157 | 100.836 |
+
+Metadata để đối chiếu với P3 (phải trùng): `batch_run_id = 20261024T104145Z`,
+`batch_cutoff_time = 2018-10-01T00:00:00Z`, `ref_version = 20261017-5f26995f`,
+`manifest_sha256 = ad81995983a5dd5d82994f41928864b66ab1eeb027a0b53af30c00b6221ca635`.
 
 ## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
 

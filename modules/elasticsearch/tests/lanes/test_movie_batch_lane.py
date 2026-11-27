@@ -255,6 +255,45 @@ def test_fixture_loader_ids_use_contract_keys_with_date_types(family):
         assert rec["_id"] == build_record_id(typed, KEYS[family])
 
 
+Q8_DIR = FIXTURES_DIR / "query8"
+P4_RT_FIXTURE = ROOT / "contracts/phase2/movielens_realtime/fixtures/movie_realtime_stats.jsonl"
+
+
+def q8(name: str) -> list[dict]:
+    return [json.loads(line) for line in (Q8_DIR / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()]
+
+
+@pytest.mark.parametrize("family", SOURCES)
+def test_query8_batch_fixture_validates(family):
+    validator = Draft202012Validator(schema(family), format_checker=FormatChecker())
+    manifest = load_json(Q8_DIR / "manifest.json")
+    for row in q8(family):
+        assert not [e.message for e in validator.iter_errors(row)], row
+        assert (row["batch_run_id"], row["batch_cutoff_time"]) == (manifest["run_id"], manifest["batch_cutoff_time"])
+    movies = {r["movieId"]: r for r in q8("movie_batch_stats")}
+    for r in q8("movie_daily_stats"):
+        assert r["rating_count"] == movies[r["movieId"]]["total_count"]  # mỗi phim chỉ một ngày
+
+
+@pytest.mark.skipif(not P4_RT_FIXTURE.is_file(), reason="Chưa có fixture movielens_realtime của P4")
+@pytest.mark.parametrize("size", ["10m", "1h"])
+def test_query8_batch_side_matches_p4_realtime_fixture(size):
+    """T nằm giữa hai nguồn: Batch (< T) bằng đúng các cửa sổ RT kết thúc trước T, Batch + RT (>= T) ra đủ mọi rating."""
+    t = load_json(Q8_DIR / "manifest.json")["batch_cutoff_time"]
+    windows = [json.loads(line) for line in P4_RT_FIXTURE.read_text(encoding="utf-8").splitlines()]
+    windows = [w for w in windows if w["window_size"] == size]
+    assert not [w for w in windows if w["window_start"] < t < w["window_end"]], "T phải tròn giờ, không cắt cửa sổ"
+    before, after, every = defaultdict(int), defaultdict(int), defaultdict(int)
+    for w in windows:
+        every[w["movieId"]] += w["interaction_count"]
+        (after if w["window_start"] >= t else before)[w["movieId"]] += w["interaction_count"]
+    batch = {r["movieId"]: r["interaction_count"] for r in q8("movie_daily_stats")}
+    assert batch == dict(before), "phía Batch phải đúng bằng phần RT trước T"
+    merged = {m: batch.get(m, 0) + after.get(m, 0) for m in set(batch) | set(after)}
+    assert merged == dict(every) and sum(merged.values()) == 23
+    assert sum(batch.values()) + sum(every.values()) == 30, "cộng thẳng không lọc T sẽ đếm trùng 7 rating"
+
+
 def test_fixture_top_movies_contains_ties():
     groups = defaultdict(list)
     for r in fixture("analytics_top_movies"):
