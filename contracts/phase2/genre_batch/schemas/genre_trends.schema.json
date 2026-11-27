@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "genre_trends source document (Phase2-3.0, P3)",
+  "description": "Một thể loại trong một ngày UTC, trước batch_cutoff_time. Field lấy nguyên từ genre_daily_stats.tsv của Module 04 (giữ UNKNOWN); _id = serialize_key_v1((batch_run_id, date, genre)).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "batch_run_id",
+    "batch_cutoff_time",
+    "generated_at",
+    "date",
+    "genre",
+    "interaction_count",
+    "rating_count",
+    "rating_sum",
+    "avg_rating"
+  ],
+  "properties": {
+    "batch_run_id": { "type": "string", "minLength": 1 },
+    "batch_cutoff_time": { "$ref": "#/$defs/utcTimestamp" },
+    "generated_at": { "$ref": "#/$defs/utcTimestamp" },
+    "date": { "$ref": "#/$defs/utcDate" },
+    "genre": { "type": "string", "minLength": 1 },
+    "interaction_count": { "type": "integer", "minimum": 1 },
+    "rating_count": { "type": "integer", "minimum": 1 },
+    "rating_sum": { "type": "number", "minimum": 0.5 },
+    "avg_rating": { "type": "number", "minimum": 0.5, "maximum": 5.0 }
+  },
+  "$defs": {
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "utcDate": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    }
+  }
+}
