@@ -85,6 +85,7 @@ SOURCE_SCHEMAS: Dict[str, T.StructType] = {
     "tmdb_rt": T.StructType(
         [
             T.StructField("tmdbId", T.IntegerType(), False),
+            T.StructField("title", T.StringType(), True),
             T.StructField("event_time", T.TimestampType(), False),
             T.StructField("popularity", T.DoubleType(), False),
             T.StructField("vote_count", T.LongType(), False),
