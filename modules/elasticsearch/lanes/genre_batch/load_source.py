@@ -12,13 +12,24 @@ import json
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 from modules.elasticsearch.common.config.es_client import ESClient, validate_index_name
 from modules.elasticsearch.lanes.genre_batch.load_fixtures import check_template
 from modules.spark_sql.common.writers.key_serializer import build_record_id
 
 GENRE_KEY_FIELDS = ("batch_run_id", "date", "genre")
+EXPECTED_GENRE_COLUMNS = (
+    "date",
+    "genre",
+    "interaction_count",
+    "rating_count",
+    "rating_sum",
+    "avg_rating",
+    "batch_run_id",
+    "batch_cutoff_time",
+    "generated_at",
+)
 
 
 def _iter_tsv_files(input_path: Path) -> List[Path]:
@@ -32,8 +43,16 @@ def _iter_tsv_files(input_path: Path) -> List[Path]:
     raise FileNotFoundError(f"Không tồn tại đường dẫn đầu vào: {input_path}")
 
 
+def _is_iso_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
 def load_manifest_info(manifest_path: Path) -> Tuple[dict, str]:
-    raw_bytes = manifest_path.read_bytes()
+    raw_bytes = manifest_path.read_bytes().replace(b"\r\n", b"\n")
     manifest_sha256 = hashlib.sha256(raw_bytes).hexdigest()
     manifest = json.loads(raw_bytes.decode("utf-8"))
     for key in ("run_id", "batch_cutoff_time", "reference"):
@@ -44,24 +63,86 @@ def load_manifest_info(manifest_path: Path) -> Tuple[dict, str]:
     return manifest, manifest_sha256
 
 
+def extract_manifest_expectations(manifest: dict) -> Dict[str, Any]:
+    """Rút trích kỳ vọng cột, generated_at, số dòng và tổng lượt gắn genre từ manifest."""
+    jobs = manifest.get("jobs") or {}
+    genre_job = jobs.get("genre_daily_stats") or {}
+
+    columns = genre_job.get("columns")
+    if columns is not None:
+        if list(columns) != list(EXPECTED_GENRE_COLUMNS):
+            raise ValueError(
+                f"Manifest jobs.genre_daily_stats.columns={columns} không khớp thứ tự chuẩn {list(EXPECTED_GENRE_COLUMNS)}"
+            )
+        expected_columns = tuple(columns)
+    else:
+        expected_columns = EXPECTED_GENRE_COLUMNS
+
+    expected_generated_at = str(manifest["generated_at"]) if manifest.get("generated_at") else None
+    counters = genre_job.get("counters") or {}
+    framework = counters.get("framework") or {}
+    data_quality = counters.get("data_quality") or {}
+
+    expected_rows: int | None = None
+    if "Reduce output records" in framework:
+        expected_rows = int(framework["Reduce output records"])
+    elif "row_count" in manifest:
+        expected_rows = int(manifest["row_count"])
+
+    expected_total: int | None = None
+    if "Reduce input records" in framework or "Map output records" in framework:
+        raw_total = int(framework.get("Reduce input records", framework.get("Map output records")))
+        expected_total = raw_total - int(data_quality.get("duplicates_removed", 0))
+    elif "sum_count" in manifest:
+        expected_total = int(manifest["sum_count"])
+
+    return {
+        "expected_columns": expected_columns,
+        "expected_generated_at": expected_generated_at,
+        "expected_rows": expected_rows,
+        "expected_total": expected_total,
+    }
+
+
 def parse_genre_daily_tsv(
     input_path: Path,
     *,
     expected_run_id: str,
     expected_cutoff: str,
+    expected_columns: Sequence[str] = EXPECTED_GENRE_COLUMNS,
+    expected_generated_at: str | None = None,
+    require_header: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Đọc, kiểm tra contract và gắn _id xác định cho từng dòng genre_daily_stats.tsv."""
+    """Đọc, kiểm tra contract (hỗ trợ có/không header) và gắn _id xác định cho từng dòng genre_daily_stats.tsv."""
     cutoff_date = expected_cutoff[:10]
+    expected_cols = list(expected_columns)
     records: List[Dict[str, Any]] = []
     seen_ids: set[str] = set()
 
     for tsv_file in _iter_tsv_files(input_path):
+        checked_first_line = False
         for line_no, raw_line in enumerate(tsv_file.read_text(encoding="utf-8").splitlines(), start=1):
             if not raw_line.strip():
                 continue
             cols = raw_line.split("\t")
-            if len(cols) != 9:
-                raise ValueError(f"{tsv_file}:{line_no}: kỳ vọng 9 cột TSV, nhận {len(cols)}")
+            if len(cols) != len(expected_cols):
+                raise ValueError(f"{tsv_file}:{line_no}: kỳ vọng {len(expected_cols)} cột TSV, nhận {len(cols)}")
+
+            if not checked_first_line:
+                checked_first_line = True
+                if cols == expected_cols:
+                    continue
+                if require_header:
+                    raise ValueError(
+                        f"{tsv_file}:{line_no}: manifest yêu cầu header {expected_cols}, nhận {cols}"
+                    )
+                if cols[0].strip().lower() == "date" or (
+                    not _is_iso_date(cols[0]) and sum(1 for c in cols if c in expected_cols) >= 2
+                ):
+                    raise ValueError(
+                        f"{tsv_file}:{line_no}: header TSV {cols} không khớp manifest {expected_cols}"
+                    )
+
             row_date, genre, inter_str, rating_str, sum_str, avg_str, run_id, cutoff, generated_at = cols
 
             if not genre:
@@ -72,6 +153,10 @@ def parse_genre_daily_tsv(
             if run_id != expected_run_id or cutoff != expected_cutoff:
                 raise ValueError(
                     f"{tsv_file}:{line_no}: metadata ({run_id}, {cutoff}) lệch manifest ({expected_run_id}, {expected_cutoff})"
+                )
+            if expected_generated_at is not None and generated_at != expected_generated_at:
+                raise ValueError(
+                    f"{tsv_file}:{line_no}: generated_at={generated_at} lệch manifest ({expected_generated_at})"
                 )
 
             interaction_count = int(inter_str)
@@ -125,13 +210,29 @@ def load_genre_source(
     run_id = str(manifest["run_id"])
     cutoff = str(manifest["batch_cutoff_time"])
     ref_version = str(manifest["reference"]["ref_version"])
+    expectations = extract_manifest_expectations(manifest)
 
     resolved_index = validate_index_name(target_index or f"genre_trends_{run_id.lower()}")
     if resolved_index == "genre_trends":
         raise ValueError("Không được ghi trực tiếp vào canonical alias 'genre_trends'")
 
-    records = parse_genre_daily_tsv(input_path, expected_run_id=run_id, expected_cutoff=cutoff)
+    records = parse_genre_daily_tsv(
+        input_path,
+        expected_run_id=run_id,
+        expected_cutoff=cutoff,
+        expected_columns=expectations["expected_columns"],
+        expected_generated_at=expectations["expected_generated_at"],
+    )
     total_assignments = sum(r["interaction_count"] for r in records)
+
+    if expectations["expected_rows"] is not None and len(records) != expectations["expected_rows"]:
+        raise ValueError(
+            f"Số dòng nguồn ({len(records)}) không khớp manifest ({expectations['expected_rows']})"
+        )
+    if expectations["expected_total"] is not None and total_assignments != expectations["expected_total"]:
+        raise ValueError(
+            f"Tổng lượt gắn genre ({total_assignments}) không khớp manifest ({expectations['expected_total']})"
+        )
 
     summary: Dict[str, Any] = {
         "target_index": resolved_index,

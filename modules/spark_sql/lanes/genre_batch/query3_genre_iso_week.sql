@@ -8,7 +8,6 @@ WITH iso_week AS (
         batch_cutoff_time,
         'iso_week' AS period_type,
         CAST(date_trunc('week', date) AS DATE) AS period_start,
-        date_format(date, "YYYY-'W'ww") AS iso_week_label,
         genre,
         SUM(interaction_count) AS interaction_count,
         SUM(rating_count) AS rating_count,
@@ -18,7 +17,6 @@ WITH iso_week AS (
         batch_run_id,
         batch_cutoff_time,
         CAST(date_trunc('week', date) AS DATE),
-        date_format(date, "YYYY-'W'ww"),
         genre
 )
 SELECT
@@ -26,7 +24,11 @@ SELECT
     batch_cutoff_time,
     period_type,
     period_start,
-    iso_week_label,
+    CONCAT(
+        CAST(YEAR(date_add(period_start, 3)) AS STRING),
+        '-W',
+        LPAD(CAST(weekofyear(period_start) AS STRING), 2, '0')
+    ) AS iso_week_label,
     genre,
     interaction_count,
     rating_count,

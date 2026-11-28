@@ -15,8 +15,17 @@ from modules.elasticsearch.common.publication.ready_report import (
     save_ready_report,
     validate_ready_reports_pair,
 )
-from modules.elasticsearch.lanes.genre_batch.emit_ready_report import build_p3_ready_report
-from modules.elasticsearch.lanes.genre_batch.load_source import load_genre_source, parse_genre_daily_tsv
+from modules.elasticsearch.lanes.genre_batch.emit_ready_report import (
+    build_p3_ready_report,
+    verify_and_build_p3_ready_report,
+)
+from modules.elasticsearch.lanes.genre_batch.load_source import (
+    EXPECTED_GENRE_COLUMNS,
+    load_genre_source,
+    parse_genre_daily_tsv,
+)
+from modules.spark_sql.common.readers.es_reader import rows_to_dataframe
+from modules.spark_sql.common.runtime.spark_session import create_spark_sql_session
 from modules.spark_sql.common.writers.key_serializer import build_record_id
 from modules.spark_sql.lanes.genre_batch.build_genre_trends import (
     ANALYTICS_SQL_PATH,
@@ -36,30 +45,69 @@ def test_parse_genre_daily_tsv_preserves_unknown_and_rejects_bad_rows(tmp_path: 
     manifest = {
         "run_id": "20261024T104145Z",
         "batch_cutoff_time": "2018-10-01T00:00:00Z",
+        "generated_at": "2026-10-24T10:45:00Z",
         "reference": {"ref_version": "20261022-7c32dfb9"},
+        "jobs": {
+            "genre_daily_stats": {
+                "columns": list(EXPECTED_GENRE_COLUMNS),
+                "counters": {
+                    "framework": {
+                        "Reduce input records": 3,
+                        "Reduce output records": 2,
+                    },
+                    "data_quality": {"duplicates_removed": 0},
+                },
+            }
+        },
     }
     manifest_file = tmp_path / "manifest.json"
     manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
 
-    tsv_file = tmp_path / "part-00000"
-    tsv_file.write_text(
-        "\n".join(
-            [
-                "2018-09-29\tAction\t2\t9.0\t9.0\t4.5\t20261024T104145Z\t2018-10-01T00:00:00Z\t2026-10-24T10:45:00Z",
-                "2018-09-29\tUNKNOWN\t1\t1\t3.0\t3.0\t20261024T104145Z\t2018-10-01T00:00:00Z\t2026-10-24T10:45:00Z",
-            ]
-        ).replace("\t9.0\t9.0\t", "\t2\t9.0\t"),
-        encoding="utf-8",
-    )
+    row1 = "2018-09-29\tAction\t2\t2\t9.0\t4.5\t20261024T104145Z\t2018-10-01T00:00:00Z\t2026-10-24T10:45:00Z"
+    row2 = "2018-09-29\tUNKNOWN\t1\t1\t3.0\t3.0\t20261024T104145Z\t2018-10-01T00:00:00Z\t2026-10-24T10:45:00Z"
+    header = "\t".join(EXPECTED_GENRE_COLUMNS)
 
-    summary = load_genre_source(tsv_file, manifest_file, dry_run=True)
+    # 1. Hỗ trợ TSV KHÔNG có header
+    tsv_no_header = tmp_path / "part-00000"
+    tsv_no_header.write_text("\n".join([row1, row2]) + "\n", encoding="utf-8")
+    summary = load_genre_source(tsv_no_header, manifest_file, dry_run=True)
     assert summary["target_index"] == "genre_trends_20261024t104145z"
     assert summary["row_count"] == 2
     assert summary["sum_count"] == 3.0
     assert summary["unknown_rows"] == 1
 
+    # 2. Hỗ trợ TSV CÓ header hợp lệ (như file export)
+    tsv_with_header = tmp_path / "genre_daily_stats.tsv"
+    tsv_with_header.write_text("\n".join([header, row1, row2]) + "\n", encoding="utf-8")
+    summary_hdr = load_genre_source(tsv_with_header, manifest_file, dry_run=True)
+    assert summary_hdr["row_count"] == 2
+    assert summary_hdr["sum_count"] == 3.0
+
+    # 3. Từ chối header sai tên/thứ tự cột
+    bad_header = tmp_path / "bad_header.tsv"
+    bad_header.write_text("\n".join(["date\tgenre\tinteraction_count\tavg_rating\trating_count\trating_sum\tbatch_run_id\tbatch_cutoff_time\tgenerated_at", row1, row2]), encoding="utf-8")
+    with pytest.raises(ValueError, match="header"):
+        load_genre_source(bad_header, manifest_file, dry_run=True)
+
+    # 4. Từ chối file bị cắt cụt (chỉ còn 1 dòng trong khi manifest ghi 2 dòng / 3 lượt)
+    truncated = tmp_path / "truncated.tsv"
+    truncated.write_text(row1 + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Số dòng nguồn"):
+        load_genre_source(truncated, manifest_file, dry_run=True)
+
+    # 5. Từ chối generated_at lệch manifest
+    bad_gen = tmp_path / "bad_gen.tsv"
+    bad_gen.write_text(row1.replace("2026-10-24T10:45:00Z", "2026-10-24T11:00:00Z") + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="generated_at"):
+        parse_genre_daily_tsv(
+            bad_gen,
+            expected_run_id="20261024T104145Z",
+            expected_cutoff="2018-10-01T00:00:00Z",
+            expected_generated_at="2026-10-24T10:45:00Z",
+        )
+
     records = parse_genre_daily_tsv(
-        tsv_file,
+        tsv_no_header,
         expected_run_id="20261024T104145Z",
         expected_cutoff="2018-10-01T00:00:00Z",
     )
@@ -196,3 +244,135 @@ def test_sql_files_follow_contract_rules() -> None:
     assert "date_trunc('week', date)" in iso_sql
     assert "ORDER BY interaction_count DESC, genre ASC" in iso_sql
     assert "AVG(avg_rating)" not in iso_sql.upper()
+    assert "YYYY-'W'ww" not in iso_sql
+
+
+class _FakeESResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _FakeESClient:
+    def __init__(self, responses: dict[str, dict]) -> None:
+        self._responses = responses
+
+    def _request(self, method: str, path: str, **kwargs) -> _FakeESResponse:
+        return _FakeESResponse(self._responses[path])
+
+
+def test_verify_and_build_p3_ready_report_rejects_missing_or_mismatched_es(tmp_path: Path) -> None:
+    manifest = {
+        "run_id": "20261024T104145Z",
+        "batch_cutoff_time": "2018-10-01T00:00:00Z",
+        "generated_at": "2026-10-24T10:45:00Z",
+        "reference": {"ref_version": "20261022-7c32dfb9"},
+        "jobs": {
+            "genre_daily_stats": {
+                "columns": list(EXPECTED_GENRE_COLUMNS),
+                "counters": {
+                    "framework": {"Reduce input records": 16, "Reduce output records": 11},
+                    "data_quality": {"duplicates_removed": 0},
+                },
+            }
+        },
+    }
+    manifest_file = tmp_path / "manifest.json"
+    manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+
+    ok_es = _FakeESClient(
+        {
+            "/genre_trends_20261024t104145z/_search": {
+                "hits": {"total": {"value": 11}},
+                "aggregations": {
+                    "sum_inter": {"value": 16.0},
+                    "sum_rating": {"value": 16.0},
+                    "mismatch_meta": {"doc_count": 0},
+                },
+            },
+            "/analytics_genre_trends_20261024t104145z/_search": {
+                "hits": {"total": {"value": 27}},
+                "aggregations": {
+                    "mismatch_meta": {"doc_count": 0},
+                    "by_period": {
+                        "buckets": [
+                            {"key": "day", "doc_count": 11, "sum_inter": {"value": 16.0}, "sum_rating": {"value": 16.0}},
+                            {"key": "month", "doc_count": 8, "sum_inter": {"value": 16.0}, "sum_rating": {"value": 16.0}},
+                            {"key": "year", "doc_count": 8, "sum_inter": {"value": 16.0}, "sum_rating": {"value": 16.0}},
+                        ]
+                    },
+                },
+            },
+        }
+    )
+    report = verify_and_build_p3_ready_report(
+        manifest_path=manifest_file,
+        source_physical_index="genre_trends_20261024t104145z",
+        analytics_physical_index="analytics_genre_trends_20261024t104145z",
+        client=ok_es,  # type: ignore[arg-type]
+    )
+    assert report.status == "READY"
+    assert report.indices[0].row_count == 11
+    assert report.indices[1].row_count == 27
+
+    # Thiếu dữ liệu source trên ES -> từ chối
+    missing_es = _FakeESClient(
+        {
+            "/genre_trends_20261024t104145z/_search": {
+                "hits": {"total": {"value": 1}},
+                "aggregations": {"sum_inter": {"value": 2.0}, "sum_rating": {"value": 2.0}, "mismatch_meta": {"doc_count": 0}},
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="manifest"):
+        verify_and_build_p3_ready_report(
+            manifest_path=manifest_file,
+            source_physical_index="genre_trends_20261024t104145z",
+            analytics_physical_index="analytics_genre_trends_20261024t104145z",
+            client=missing_es,  # type: ignore[arg-type]
+        )
+
+    # Không cho xuất READY nếu SQL test FAIL
+    with pytest.raises(ValueError, match="PASS"):
+        verify_and_build_p3_ready_report(
+            manifest_path=manifest_file,
+            source_physical_index="genre_trends_20261024t104145z",
+            analytics_physical_index="analytics_genre_trends_20261024t104145z",
+            sql_test_result="FAIL",
+            client=ok_es,  # type: ignore[arg-type]
+        )
+
+
+def test_query3_iso_week_sql_executes_in_spark_35_across_year_boundaries() -> None:
+    pytest.importorskip("pyspark")
+    spark = create_spark_sql_session(app_name="test-p3-iso-week-sql")
+    try:
+        sample_rows = [
+            # 2015-12-31 (Thu) & 2016-01-01 (Fri) -> cùng tuần ISO 2015-W53 (Thứ 2 = 2015-12-28)
+            {"batch_run_id": "r1", "batch_cutoff_time": "2019-10-01T00:00:00Z", "generated_at": "2026-11-27T00:00:00Z", "date": "2015-12-31", "genre": "Action", "interaction_count": 1, "rating_count": 1, "rating_sum": 4.0, "avg_rating": 4.0},
+            {"batch_run_id": "r1", "batch_cutoff_time": "2019-10-01T00:00:00Z", "generated_at": "2026-11-27T00:00:00Z", "date": "2016-01-01", "genre": "Action", "interaction_count": 2, "rating_count": 2, "rating_sum": 10.0, "avg_rating": 5.0},
+            # 2017-12-30 (Sat) & 2017-12-31 (Sun) -> 2017-W52 (Thứ 2 = 2017-12-25)
+            {"batch_run_id": "r1", "batch_cutoff_time": "2019-10-01T00:00:00Z", "generated_at": "2026-11-27T00:00:00Z", "date": "2017-12-30", "genre": "Drama", "interaction_count": 2, "rating_count": 2, "rating_sum": 7.0, "avg_rating": 3.5},
+            {"batch_run_id": "r1", "batch_cutoff_time": "2019-10-01T00:00:00Z", "generated_at": "2026-11-27T00:00:00Z", "date": "2017-12-31", "genre": "Action", "interaction_count": 2, "rating_count": 2, "rating_sum": 9.0, "avg_rating": 4.5},
+            # 2018-12-31 (Mon) -> thuộc tuần ISO 2019-W01 (giao năm dương 2018 -> năm ISO 2019!)
+            {"batch_run_id": "r1", "batch_cutoff_time": "2019-10-01T00:00:00Z", "generated_at": "2026-11-27T00:00:00Z", "date": "2018-12-31", "genre": "Comedy", "interaction_count": 3, "rating_count": 3, "rating_sum": 12.0, "avg_rating": 4.0},
+        ]
+        rows_to_dataframe(spark, "batch_genre", sample_rows).createOrReplaceTempView("batch_genre")
+        out = spark.sql(QUERY3_ISO_WEEK_SQL_PATH.read_text(encoding="utf-8")).collect()
+        by_key = {(r["period_start"].isoformat(), r["genre"]): r for r in out}
+
+        w53 = by_key[("2015-12-28", "Action")]
+        assert w53["iso_week_label"] == "2015-W53"
+        assert w53["rating_count"] == 3
+        assert w53["avg_rating"] == pytest.approx(14.0 / 3.0)
+
+        assert by_key[("2017-12-25", "Action")]["iso_week_label"] == "2017-W52"
+        assert by_key[("2017-12-25", "Action")]["rank_in_period"] == 1
+        assert by_key[("2017-12-25", "Drama")]["rank_in_period"] == 2
+
+        w01_2019 = by_key[("2018-12-31", "Comedy")]
+        assert w01_2019["iso_week_label"] == "2019-W01"
+    finally:
+        spark.stop()
