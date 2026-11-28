@@ -134,6 +134,102 @@ $PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.job --io-mode fixture    
   `Ignoring non-Spark config property`). Vì vậy run hiện tại ghi bằng `fixture` (REST bulk qua writer dùng chung):
   hết khoảng 1 phút, bộ nhớ đỉnh khoảng 500 MB.
 
+## Truy vấn bắt buộc của P2: query 1, 2, 4, 5, 6 (contract mục 8.1)
+
+SQL nằm ở `modules/spark_sql/lanes/movie_batch/sql/queries/`, hàm Python ở `modules/spark_sql/lanes/movie_batch/queries.py`.
+Truy vấn chạy trên source của run và hai analytics tạo bằng đúng SQL của job, nên luôn khớp D1/D2. Kết quả không ghi
+thành index (contract chỉ bắt materialize sáu analytics family).
+
+| # | Truy vấn | Cách tính |
+| --- | --- | --- |
+| 1 | Top phim | `analytics_top_movies` của **đúng một** kỳ month/year/all, theo `rank_in_period` (hòa thì `movieId` tăng) |
+| 2 | Rating trung bình phim | Dòng `entity_type=movie` của một kỳ; `rating_sum / rating_count`, không average-of-averages; ngưỡng `min_ratings` tùy chọn (mặc định 1) |
+| 4 | Xu hướng 7 ngày | previous `[mốc-14, mốc-7)`, current `[mốc-7, mốc)`; `growth = (current - previous) / (previous + 1)` (DATA_CONTRACT 14.4) |
+| 5 | Xu hướng 30 ngày | Như query 4 với 30 ngày liên tiếp; không thay bằng tháng lịch |
+| 6 | WoW | Hai tuần ISO trọn vẹn (thứ Hai 00:00Z): tuần trọn gần nhất kết thúc trước hoặc đúng mốc, so với tuần liền trước |
+
+Quy ước cho query 4–6:
+- **Mốc** mặc định là ngày của T. Mốc lấy trên timeline dữ liệu nguồn, không dùng ngày hiện tại của máy (DATA_CONTRACT mục 5.4).
+  Muốn demo một giai đoạn có nhiều rating thì truyền `--as-of`.
+- **`coverage_status`:** `verified` khi cả hai khoảng nằm trong vùng Batch đã tính (từ ngày có rating đầu tiên tới
+  `current_end <= T`). Ngược lại là `unverified`, và số đếm cùng `growth` để NULL.
+- `window_bounds()` luôn trả đúng 1 dòng (hai khoảng + `coverage_status`), kể cả khi hai khoảng không có rating nào.
+
+```bash
+export PYSPARK_PYTHON=~/.venvs/movie-trend-spark/bin/python PYSPARK_DRIVER_PYTHON=$PYSPARK_PYTHON
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.queries q01 --period-type month --period-start 2018-05-01
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.queries q02 --movie-id 1 --movie-id 296
+$PYSPARK_PYTHON -m modules.spark_sql.lanes.movie_batch.queries q04 --as-of 2018-09-01   # q05, q06 tương tự
+```
+
+Kết quả với run thật:
+- Query 1 all-time: Forrest Gump 329 · Shawshank 317 · Pulp Fiction 307.
+- Query 2: Shawshank 4,429 (317 rating).
+- Query 4 với mốc T: previous `[2018-09-17, 2018-09-24)`, current `[2018-09-24, 2018-10-01)`, `verified`, 186 phim.
+  Rating cuối là 2018-09-24, nên current chỉ có ngày đó.
+
+Dữ liệu nhỏ (mỗi phim vài rating mỗi tuần) nên growth thường là 0→1 hoặc 0→2. Contract cho phép thêm ngưỡng loại phim ít
+tương tác (DATA_CONTRACT 14.3), nhưng ngưỡng đó phải được ghi rõ như một cấu hình; hiện chưa đặt.
+
+### Fixture query 8 "Batch vs Realtime" (P4 làm chủ, P2 cấp phía Batch)
+
+`fixtures/query8/` là phía Batch, với **T = `2018-09-20T11:00:00Z`** nằm giữa hai nguồn (P4 đã đồng ý):
+- Phía Batch: **tính thẳng từ fixture `contracts/phase2/movielens_realtime` (P4)** bằng `build_fixtures.py`, gồm các
+  cửa sổ 10m kết thúc trước hoặc đúng T, cộng theo (ngày, phim); title và `ref_version` cũng lấy từ fixture P4. Không
+  chép tay rating, nên P4 đổi fixture thì `build_fixtures.py --check` báo phải sinh lại.
+- Phía Realtime: các cửa sổ `window_start >= T` của fixture P4, dùng nguyên không sửa.
+- T tròn giờ nên không cửa sổ 10m/1h nào bị cắt đôi.
+
+Có hai mức kỳ vọng. Mức **complete** chỉ lấy cửa sổ RT có `window_end <= source_complete_through` của snapshot
+READY mới nhất (`fixture-p4-s002`: `2018-09-20T12:00:00Z`), nên bỏ các cửa sổ 12:00 chưa hoàn chỉnh. P4 đề xuất
+query 8 dùng mức này.
+
+| movieId | Batch (< T) | RT (>= T) toàn bộ | RT (>= T) complete | Ghép toàn bộ | **Ghép complete** |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 218 | 1 | 4 | 4 | 5 | **5** |
+| 222 | 3 | 5 | 4 | 8 | **7** |
+| 227 | 1 | 2 | 2 | 3 | **3** |
+| 343 | 2 | 3 | 1 | 5 | **3** |
+| 999001 | 0 | 2 | 2 | 2 | **2** |
+| **Tổng** | 7 | 16 | 13 | 23 | **20** |
+
+- Cửa sổ 10m và 1h cho cùng kết quả ở cả hai mức.
+- Cộng thẳng Batch + mọi cửa sổ RT mà không lọc T ra 30, tức đếm trùng đúng 7 lượt của phía Batch.
+- Test `test_query8_batch_side_matches_p4_realtime_fixture` tính mọi kỳ vọng từ fixture P4 (count và
+  `rating_sum`), không viết cứng.
+- Chưa có phim chỉ ở phía Batch; P4 bổ sung khi viết query 8.
+- T này chỉ dùng cho fixture; T của run thật vẫn là `2018-10-01T00:00:00Z`.
+
+## READY report (P2.3)
+
+```bash
+.venv/bin/python -m modules.elasticsearch.lanes.movie_batch.emit_ready_report --sql-test-result PASS
+```
+
+Lệnh gộp `p2_source_<run>.json` và `p2_analytics_<run>.json`, rồi **kiểm tra lại trực tiếp trên ES** trước khi ghi
+`status = READY` vào `data/local/phase2/es_reports/p2_ready_<run>.json`:
+- 4 physical index tồn tại, đúng số document;
+- mỗi index đúng một `batch_run_id` và một `batch_cutoff_time`;
+- hai analytics có đúng một `ref_version` và một `manifest_hash`, trùng manifest của run;
+- tổng lượt all-time của cả 4 index bằng nhau (`sum_count`).
+
+Chỉ truyền `--sql-test-result PASS` sau khi `modules/spark_sql/tests/lanes` pass; `FAIL` thì report là `NOT_READY`.
+Report dùng `ReadyReport` dùng chung, nên P5 ghép được với `p3_ready_<run>.json` qua `validate_ready_reports_pair`
+rồi chạy `make -C modules/elasticsearch publish-dry` / `publish RUN_ID=<run>`.
+
+Run `20261024T104145Z` đã READY:
+
+| Alias | Physical index | Document | Tổng lượt |
+| --- | --- | ---: | ---: |
+| `movie_batch_stats` | `movie_batch_stats_20261024t104145z` | 9.724 | 100.836 |
+| `movie_daily_stats` | `movie_daily_stats_20261024t104145z` | 99.538 | 100.836 |
+| `analytics_timeseries` | `analytics_timeseries_20261024t104145z` | 237.096 | 100.836 |
+| `analytics_top_movies` | `analytics_top_movies_20261024t104145z` | 133.157 | 100.836 |
+
+Metadata để đối chiếu với P3 (phải trùng): `batch_run_id = 20261024T104145Z`,
+`batch_cutoff_time = 2018-10-01T00:00:00Z`, `ref_version = 20261017-5f26995f`,
+`manifest_sha256 = ad81995983a5dd5d82994f41928864b66ab1eeb027a0b53af30c00b6221ca635`.
+
 ## Số đối chứng với dữ liệu thật (run `20261024T104145Z`, T = `2018-10-01T00:00:00Z`)
 
 | Bảng | Số dòng kỳ vọng |

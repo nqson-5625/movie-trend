@@ -1,0 +1,17 @@
+{
+  "batch_cutoff_time": "2018-09-20T11:00:00Z",
+  "contract_version": "1.0-draft",
+  "fixture": true,
+  "generated_at": "2026-11-24T00:00:00Z",
+  "note": "FIXTURE P2 phía Batch cho query 8, tính từ fixture movielens_realtime của P4",
+  "output_format": {
+    "delimiter": "tab",
+    "files": "part-NNNNN",
+    "header": false
+  },
+  "reference": {
+    "ref_version": "20261010-01e56f1d"
+  },
+  "run_id": "fixture-p2-q8",
+  "semantics": "event_time < batch_cutoff_time"
+}

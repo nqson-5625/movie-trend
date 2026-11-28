@@ -1,0 +1,4 @@
+{"avg_rating": 2.0, "batch_cutoff_time": "2018-09-20T11:00:00Z", "batch_run_id": "fixture-p2-q8", "date": "2018-09-20", "generated_at": "2026-11-24T00:00:00Z", "interaction_count": 1, "movieId": 218, "rating_count": 1, "rating_sum": 2.0}
+{"avg_rating": 4.333333333333333, "batch_cutoff_time": "2018-09-20T11:00:00Z", "batch_run_id": "fixture-p2-q8", "date": "2018-09-20", "generated_at": "2026-11-24T00:00:00Z", "interaction_count": 3, "movieId": 222, "rating_count": 3, "rating_sum": 13.0}
+{"avg_rating": 3.5, "batch_cutoff_time": "2018-09-20T11:00:00Z", "batch_run_id": "fixture-p2-q8", "date": "2018-09-20", "generated_at": "2026-11-24T00:00:00Z", "interaction_count": 1, "movieId": 227, "rating_count": 1, "rating_sum": 3.5}
+{"avg_rating": 3.25, "batch_cutoff_time": "2018-09-20T11:00:00Z", "batch_run_id": "fixture-p2-q8", "date": "2018-09-20", "generated_at": "2026-11-24T00:00:00Z", "interaction_count": 2, "movieId": 343, "rating_count": 2, "rating_sum": 6.5}
