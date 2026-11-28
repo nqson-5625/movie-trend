@@ -47,33 +47,39 @@ DAILY = [
 BATCH_META = {"batch_run_id": BATCH_RUN_ID, "batch_cutoff_time": BATCH_CUTOFF_TIME}
 
 # ---- Phía Batch của fixture query 8 "Batch vs Realtime" (contract mục 8.1: P4 làm chủ, P2 cấp phía Batch) ----
-# T nằm giữa hai nguồn: 7 rating trước 11:00 ngày 2018-09-20 của fixture movielens_realtime (P4) thuộc Batch,
-# các cửa sổ RT có window_start >= T là phần Realtime. Ghép đúng phải ra đúng 23 rating của fixture P4.
+# T nằm giữa hai nguồn: phần trước T của fixture movielens_realtime (P4) thuộc Batch, các cửa sổ RT có
+# window_start >= T là phần Realtime. Phía Batch được tính thẳng từ fixture P4 (không chép tay rating), nên P4 đổi
+# fixture thì `--check` báo phải sinh lại.
 Q8_RUN_ID = "fixture-p2-q8"
 Q8_CUTOFF_TIME = "2018-09-20T11:00:00Z"
-Q8_REF_VERSION = "20261010-01e56f1d"  # cùng reference sample với fixture P4
-Q8_TITLES = {218: "Boys on the Side (1995)", 222: "Circle of Friends (1995)", 227: "Drop Zone (1994)",
-             343: "Baby-Sitters Club, The (1995)"}
-Q8_RATINGS_BEFORE_T = [  # (event_time UTC, movieId, rating) — trùng các rating < T trong fixture P4
-    ("2018-09-20T09:15:00Z", 222, 4.0),
-    ("2018-09-20T09:20:00Z", 343, 3.0),
-    ("2018-09-20T09:30:00Z", 227, 3.5),
-    ("2018-09-20T10:05:00Z", 222, 5.0),
-    ("2018-09-20T10:10:00Z", 222, 4.0),
-    ("2018-09-20T10:30:00Z", 218, 2.0),
-    ("2018-09-20T10:45:00Z", 343, 3.5),
-]
+P4_FIXTURES_DIR = LANE_DIR.parent / "movielens_realtime" / "fixtures"
+
+
+def _p4_rows(name: str) -> list[dict]:
+    return [json.loads(line) for line in (P4_FIXTURES_DIR / name).read_text(encoding="utf-8").splitlines() if line]
 
 
 def q8_daily() -> list[tuple[str, int, int, float]]:
-    """Cộng các rating trước T thành dạng movie_daily_stats (ngày UTC của event_time)."""
+    """Cửa sổ 10m của P4 kết thúc trước hoặc đúng T, cộng theo (ngày UTC, movieId) thành dạng movie_daily_stats."""
     acc: dict[tuple[str, int], list] = defaultdict(lambda: [0, 0.0])
-    for event_time, movie, rating in Q8_RATINGS_BEFORE_T:
-        if event_time >= Q8_CUTOFF_TIME:
-            raise ValueError(f"Rating {event_time} không trước mốc T của query 8")
-        acc[(event_time[:10], movie)][0] += 1
-        acc[(event_time[:10], movie)][1] += rating
+    for w in _p4_rows("movie_realtime_stats.jsonl"):
+        if w["window_size"] == "10m" and w["window_end"] <= Q8_CUTOFF_TIME:
+            acc[(w["window_start"][:10], w["movieId"])][0] += w["interaction_count"]
+            acc[(w["window_start"][:10], w["movieId"])][1] += w["rating_sum"]
     return [(day, movie, count, total) for (day, movie), (count, total) in sorted(acc.items())]
+
+
+def q8_titles_and_ref_version() -> tuple[dict[int, str | None], str]:
+    """Title và ref_version giống hệt cách P4 gắn nhãn phim (title_source = movie_reference/<ref_version>)."""
+    titles, refs = {}, set()
+    for r in _p4_rows("analytics_growth.jsonl"):
+        if r["entity_type"] == "movie":
+            titles[r["movieId"]] = r["title"]
+            if r["title_source"]:
+                refs.add(r["title_source"].split("/", 1)[1])
+    if len(refs) != 1:
+        raise ValueError(f"Fixture P4 phải dùng đúng một ref_version, có {sorted(refs)}")
+    return titles, refs.pop()
 
 
 def period_start(period_type: str, day: str) -> str | None:
@@ -177,9 +183,10 @@ def render() -> dict[str, str]:
     manifest_text = json.dumps(build_manifest(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     manifest_hash = hashlib.sha256(manifest_text.encode("utf-8")).hexdigest()
     movies, daily = build_sources()
-    q8_manifest = build_manifest(Q8_RUN_ID, Q8_CUTOFF_TIME, Q8_REF_VERSION,
-                                 "FIXTURE P2 phía Batch cho query 8, khớp fixture movielens_realtime của P4")
-    q8_movies, q8_daily_rows = build_sources(q8_daily(), Q8_TITLES,
+    q8_titles, q8_ref_version = q8_titles_and_ref_version()
+    q8_manifest = build_manifest(Q8_RUN_ID, Q8_CUTOFF_TIME, q8_ref_version,
+                                 "FIXTURE P2 phía Batch cho query 8, tính từ fixture movielens_realtime của P4")
+    q8_movies, q8_daily_rows = build_sources(q8_daily(), q8_titles,
                                              {"batch_run_id": Q8_RUN_ID, "batch_cutoff_time": Q8_CUTOFF_TIME})
     return {
         "manifest.json": manifest_text,

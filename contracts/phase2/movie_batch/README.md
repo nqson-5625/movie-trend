@@ -173,23 +173,32 @@ tương tác (DATA_CONTRACT 14.3), nhưng ngưỡng đó phải được ghi rõ
 
 ### Fixture query 8 "Batch vs Realtime" (P4 làm chủ, P2 cấp phía Batch)
 
-`fixtures/query8/` là phía Batch, với **T = `2018-09-20T11:00:00Z`** nằm giữa hai nguồn:
-- Phía Batch: 7 rating trước 11:00 của chính fixture `contracts/phase2/movielens_realtime` (P4).
-- Phía Realtime: các cửa sổ `window_start >= T` của fixture P4. Dùng nguyên fixture P4, không phải sửa.
+`fixtures/query8/` là phía Batch, với **T = `2018-09-20T11:00:00Z`** nằm giữa hai nguồn (P4 đã đồng ý):
+- Phía Batch: **tính thẳng từ fixture `contracts/phase2/movielens_realtime` (P4)** bằng `build_fixtures.py`, gồm các
+  cửa sổ 10m kết thúc trước hoặc đúng T, cộng theo (ngày, phim); title và `ref_version` cũng lấy từ fixture P4. Không
+  chép tay rating, nên P4 đổi fixture thì `build_fixtures.py --check` báo phải sinh lại.
+- Phía Realtime: các cửa sổ `window_start >= T` của fixture P4, dùng nguyên không sửa.
 - T tròn giờ nên không cửa sổ 10m/1h nào bị cắt đôi.
 
-| movieId | Batch (< T) | RT (>= T) | Ghép đúng |
-| --- | ---: | ---: | ---: |
-| 218 | 1 | 4 | 5 |
-| 222 | 3 | 5 | 8 |
-| 227 | 1 | 2 | 3 |
-| 343 | 2 | 3 | 5 |
-| 999001 | 0 | 2 | 2 |
-| **Tổng** | 7 | 16 | **23** = đủ 23 rating của fixture P4 |
+Có hai mức kỳ vọng. Mức **complete** chỉ lấy cửa sổ RT có `window_end <= source_complete_through` của snapshot
+READY mới nhất (`fixture-p4-s002`: `2018-09-20T12:00:00Z`), nên bỏ các cửa sổ 12:00 chưa hoàn chỉnh. P4 đề xuất
+query 8 dùng mức này.
 
-Cửa sổ 10m và 1h đều phải ra 23. Cộng thẳng Batch + mọi cửa sổ RT không lọc T ra 30, tức đếm trùng 7.
-Test `test_query8_batch_side_matches_p4_realtime_fixture` kiểm chéo hai fixture. T này chỉ dùng cho fixture;
-T của run thật vẫn là `2018-10-01T00:00:00Z`.
+| movieId | Batch (< T) | RT (>= T) toàn bộ | RT (>= T) complete | Ghép toàn bộ | **Ghép complete** |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 218 | 1 | 4 | 4 | 5 | **5** |
+| 222 | 3 | 5 | 4 | 8 | **7** |
+| 227 | 1 | 2 | 2 | 3 | **3** |
+| 343 | 2 | 3 | 1 | 5 | **3** |
+| 999001 | 0 | 2 | 2 | 2 | **2** |
+| **Tổng** | 7 | 16 | 13 | 23 | **20** |
+
+- Cửa sổ 10m và 1h cho cùng kết quả ở cả hai mức.
+- Cộng thẳng Batch + mọi cửa sổ RT mà không lọc T ra 30, tức đếm trùng đúng 7 lượt của phía Batch.
+- Test `test_query8_batch_side_matches_p4_realtime_fixture` tính mọi kỳ vọng từ fixture P4 (count và
+  `rating_sum`), không viết cứng.
+- Chưa có phim chỉ ở phía Batch; P4 bổ sung khi viết query 8.
+- T này chỉ dùng cho fixture; T của run thật vẫn là `2018-10-01T00:00:00Z`.
 
 ## READY report (P2.3)
 

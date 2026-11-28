@@ -275,23 +275,46 @@ def test_query8_batch_fixture_validates(family):
         assert r["rating_count"] == movies[r["movieId"]]["total_count"]  # mỗi phim chỉ một ngày
 
 
+def sums(windows: list[dict]) -> dict[int, tuple[int, float]]:
+    """movieId -> (interaction_count, rating_sum) cộng qua các cửa sổ."""
+    acc = defaultdict(lambda: [0, 0.0])
+    for w in windows:
+        acc[w["movieId"]][0] += w["interaction_count"]
+        acc[w["movieId"]][1] += w["rating_sum"]
+    return {m: (c, s) for m, (c, s) in acc.items()}
+
+
+def merge(a: dict, b: dict) -> dict[int, tuple[int, float]]:
+    return {m: (a.get(m, (0, 0.0))[0] + b.get(m, (0, 0.0))[0], a.get(m, (0, 0.0))[1] + b.get(m, (0, 0.0))[1])
+            for m in set(a) | set(b)}
+
+
 @pytest.mark.skipif(not P4_RT_FIXTURE.is_file(), reason="Chưa có fixture movielens_realtime của P4")
 @pytest.mark.parametrize("size", ["10m", "1h"])
 def test_query8_batch_side_matches_p4_realtime_fixture(size):
-    """T nằm giữa hai nguồn: Batch (< T) bằng đúng các cửa sổ RT kết thúc trước T, Batch + RT (>= T) ra đủ mọi rating."""
+    """T nằm giữa hai nguồn. Mọi kỳ vọng tính từ fixture P4 (count và rating_sum), không viết cứng:
+    - Batch (< T) bằng đúng các cửa sổ RT kết thúc trước hoặc đúng T;
+    - mức toàn bộ: Batch + RT (window_start >= T) = mọi cửa sổ của size đó;
+    - mức complete: chỉ lấy cửa sổ RT có window_end <= source_complete_through của snapshot READY mới nhất;
+    - cộng thẳng Batch + mọi cửa sổ (không lọc T) đếm trùng đúng bằng phía Batch."""
     t = load_json(Q8_DIR / "manifest.json")["batch_cutoff_time"]
+    snapshots = load_json(P4_RT_FIXTURE.parent / "snapshots.json")["snapshots"]
+    complete_through = max(s["source_complete_through"] for s in snapshots if s["status"] == "READY")
     windows = [json.loads(line) for line in P4_RT_FIXTURE.read_text(encoding="utf-8").splitlines()]
     windows = [w for w in windows if w["window_size"] == size]
     assert not [w for w in windows if w["window_start"] < t < w["window_end"]], "T phải tròn giờ, không cắt cửa sổ"
-    before, after, every = defaultdict(int), defaultdict(int), defaultdict(int)
-    for w in windows:
-        every[w["movieId"]] += w["interaction_count"]
-        (after if w["window_start"] >= t else before)[w["movieId"]] += w["interaction_count"]
-    batch = {r["movieId"]: r["interaction_count"] for r in q8("movie_daily_stats")}
-    assert batch == dict(before), "phía Batch phải đúng bằng phần RT trước T"
-    merged = {m: batch.get(m, 0) + after.get(m, 0) for m in set(batch) | set(after)}
-    assert merged == dict(every) and sum(merged.values()) == 23
-    assert sum(batch.values()) + sum(every.values()) == 30, "cộng thẳng không lọc T sẽ đếm trùng 7 rating"
+
+    batch = {r["movieId"]: (r["interaction_count"], r["rating_sum"]) for r in q8("movie_daily_stats")}
+    assert batch == sums([w for w in windows if w["window_end"] <= t]), "phía Batch = phần RT trước T (count + sum)"
+    rt_after = [w for w in windows if w["window_start"] >= t]
+    assert merge(batch, sums(rt_after)) == sums(windows), "mức toàn bộ"
+    rt_complete = [w for w in rt_after if w["window_end"] <= complete_through]
+    assert merge(batch, sums(rt_complete)) == sums([w for w in windows if w["window_end"] <= complete_through]), \
+        "mức complete"
+    assert len(rt_complete) < len(rt_after), "fixture phải có cửa sổ chưa complete để phân biệt hai mức"
+    naive = sum(c for c, _ in batch.values()) + sum(w["interaction_count"] for w in windows)
+    assert naive - sum(c for c, _ in sums(windows).values()) == sum(c for c, _ in batch.values()), \
+        "không lọc T thì đếm trùng đúng bằng phía Batch"
 
 
 def test_fixture_top_movies_contains_ties():
