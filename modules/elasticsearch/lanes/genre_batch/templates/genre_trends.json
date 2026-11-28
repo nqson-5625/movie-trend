@@ -1,0 +1,33 @@
+{
+  "index_patterns": [
+    "genre_trends",
+    "genre_trends_*",
+    "dev_p2_genre_trends*",
+    "dev_p3_genre_trends*",
+    "dev_p4_genre_trends*",
+    "dev_p5_genre_trends*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "movie_trend_base_settings",
+    "movie_trend_batch_meta"
+  ],
+  "template": {
+    "mappings": {
+      "properties": {
+        "date": { "type": "date", "format": "strict_date" },
+        "genre": {
+          "type": "keyword",
+          "fields": {
+            "text": { "type": "text" }
+          }
+        },
+        "interaction_count": { "type": "long" },
+        "rating_count": { "type": "long" },
+        "rating_sum": { "type": "double" },
+        "avg_rating": { "type": "double" },
+        "generated_at": { "type": "date", "format": "strict_date_optional_time||strict_date" }
+      }
+    }
+  }
+}

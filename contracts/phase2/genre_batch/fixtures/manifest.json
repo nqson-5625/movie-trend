@@ -1,0 +1,18 @@
+{
+  "batch_cutoff_time": "2018-03-01T00:00:00Z",
+  "contract_version": "1.0-draft",
+  "fixture": true,
+  "generated_at": "2026-11-27T00:00:00Z",
+  "multi_label": true,
+  "note": "FIXTURE P3 dựng tay, không phải kết quả MapReduce thật",
+  "output_format": {
+    "delimiter": "tab",
+    "files": "part-NNNNN",
+    "header": false
+  },
+  "reference": {
+    "ref_version": "fixture-ref-v1"
+  },
+  "run_id": "fixture-p3-v1",
+  "semantics": "event_time < batch_cutoff_time"
+}
